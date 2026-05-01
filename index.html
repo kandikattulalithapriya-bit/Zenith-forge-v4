@@ -387,9 +387,8 @@ window.makePost = async function() {
   });
   showToast(`day ${post.day} logged ✓`);
 
-  // Telegram notification
-  const tgMsg = `🔥 <b>${ME}</b> — Day ${post.day}\n📝 "${t}"\n⚡ Streak: ${newStreak} days · ${post.date} ${post.time}\n— ${settings.appName}`;
-  sendTg(tgMsg);
+  // Telegram image card
+  sendTgCard(post, newStreak);
 
   // Auto upload image to Google Drive
   if (imgData) {
@@ -498,8 +497,9 @@ window.saveTgChat = function() {
 };
 window.testTg = async function() {
   if (!settings.tgToken || !settings.tgChat) { showToast('save token + chat id first'); return; }
-  await sendTg('🔥 EPOCH — bot connected successfully ✅');
-  showToast('test sent — check telegram ✓');
+  const testPost = { text: 'bot connected — epoch is live ✅', day: 0, time: new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}), date: new Date().toLocaleDateString([],{day:'numeric',month:'short'}), img: null };
+  await sendTgCard(testPost, 0);
+  showToast('test card sent — check telegram ✓');
 };
 
 async function sendTg(msg) {
@@ -511,6 +511,198 @@ async function sendTg(msg) {
       body: JSON.stringify({ chat_id: settings.tgChat, text: msg, parse_mode: 'HTML' })
     });
   } catch(e) {}
+}
+
+// ── TELEGRAM IMAGE CARD ──
+async function sendTgCard(post, streakCount) {
+  if (!settings.tgToken || !settings.tgChat) return;
+
+  const W = 900, H = 520;
+  const canvas = document.createElement('canvas');
+  canvas.width = W; canvas.height = H;
+  const ctx = canvas.getContext('2d');
+
+  // get accent color from current theme
+  const themeColors = {
+    scifi: '#00ffc8', cyber: '#ff00cc', space: '#88c0ff',
+    forge: '#ffaa00', void: '#c8c8c8', glass: '#4dc8ff'
+  };
+  const userTheme = ME === (document.getElementById('un1')?.textContent) ? settings.u1Theme : settings.u2Theme;
+  const acc = themeColors[userTheme] || '#00ffc8';
+  const accRgb = hexToRgb(acc);
+
+  // ── background ──
+  const bg = ctx.createLinearGradient(0, 0, W, H);
+  bg.addColorStop(0, '#03050a');
+  bg.addColorStop(1, '#07091a');
+  ctx.fillStyle = bg;
+  ctx.fillRect(0, 0, W, H);
+
+  // subtle grid overlay
+  ctx.strokeStyle = `rgba(${accRgb},0.04)`;
+  ctx.lineWidth = 1;
+  for (let x = 0; x < W; x += 40) { ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,H); ctx.stroke(); }
+  for (let y = 0; y < H; y += 40) { ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(W,y); ctx.stroke(); }
+
+  // corner brackets
+  const bSize = 22, bGap = 14;
+  ctx.strokeStyle = `rgba(${accRgb},0.5)`;
+  ctx.lineWidth = 2;
+  [[bGap,bGap],[W-bGap,bGap],[bGap,H-bGap],[W-bGap,H-bGap]].forEach(([cx,cy]) => {
+    const sx = cx === bGap ? 1 : -1, sy = cy === bGap ? 1 : -1;
+    ctx.beginPath(); ctx.moveTo(cx,cy+sy*bSize); ctx.lineTo(cx,cy); ctx.lineTo(cx+sx*bSize,cy); ctx.stroke();
+  });
+
+  // glow line top
+  const gl = ctx.createLinearGradient(0,0,W,0);
+  gl.addColorStop(0,'transparent'); gl.addColorStop(0.5,acc); gl.addColorStop(1,'transparent');
+  ctx.strokeStyle = gl; ctx.lineWidth = 1.5;
+  ctx.beginPath(); ctx.moveTo(0,0); ctx.lineTo(W,0); ctx.stroke();
+
+  // left image panel (if image exists)
+  const hasImg = !!post.img;
+  const leftW = hasImg ? 420 : 0;
+  const rightX = hasImg ? leftW + 20 : 50;
+  const rightW = W - rightX - 50;
+
+  if (hasImg) {
+    await new Promise(resolve => {
+      const img = new Image();
+      img.onload = () => {
+        // image area with rounded clip
+        ctx.save();
+        roundRect(ctx, 20, 20, leftW - 10, H - 40, 6);
+        ctx.clip();
+        // draw image cover
+        const iAR = img.width / img.height;
+        const pAR = (leftW - 10) / (H - 40);
+        let sw, sh, sx, sy;
+        if (iAR > pAR) { sh = H-40; sw = sh*iAR; sy = 20; sx = 20-(sw-(leftW-10))/2; }
+        else { sw = leftW-10; sh = sw/iAR; sx = 20; sy = 20-(sh-(H-40))/2; }
+        ctx.drawImage(img, sx, sy, sw, sh);
+        // dark overlay for readability
+        ctx.fillStyle = 'rgba(3,5,10,0.35)';
+        ctx.fillRect(20, 20, leftW-10, H-40);
+        ctx.restore();
+        // image border glow
+        ctx.strokeStyle = `rgba(${accRgb},0.3)`;
+        ctx.lineWidth = 1;
+        roundRect(ctx, 20, 20, leftW-10, H-40, 6);
+        ctx.stroke();
+        resolve();
+      };
+      img.onerror = resolve;
+      img.src = post.img;
+    });
+  }
+
+  // ── right panel content ──
+
+  // app name watermark top right
+  ctx.font = '700 11px monospace';
+  ctx.fillStyle = `rgba(${accRgb},0.35)`;
+  ctx.letterSpacing = '0.2em';
+  ctx.textAlign = 'right';
+  ctx.fillText(settings.appName.toUpperCase(), W - 30, 44);
+  ctx.textAlign = 'left';
+
+  // user avatar circle
+  const avX = rightX + 26, avY = 80;
+  ctx.save();
+  ctx.beginPath(); ctx.arc(avX, avY, 22, 0, Math.PI*2);
+  ctx.fillStyle = `rgba(${accRgb},0.12)`; ctx.fill();
+  ctx.strokeStyle = acc; ctx.lineWidth = 1.5; ctx.stroke();
+  ctx.restore();
+  ctx.font = '700 16px monospace';
+  ctx.fillStyle = acc;
+  ctx.textAlign = 'center';
+  ctx.fillText(ME[0].toUpperCase(), avX, avY + 6);
+  ctx.textAlign = 'left';
+
+  // name
+  ctx.font = '700 22px monospace';
+  ctx.fillStyle = '#ffffff';
+  ctx.fillText(ME, rightX + 58, avY - 6);
+
+  // day badge
+  ctx.font = '600 12px monospace';
+  ctx.fillStyle = acc;
+  ctx.fillText(`DAY ${post.day}`, rightX + 58, avY + 12);
+
+  // divider
+  ctx.strokeStyle = `rgba(${accRgb},0.2)`;
+  ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(rightX, avY + 34); ctx.lineTo(W - 30, avY + 34); ctx.stroke();
+
+  // post text — word wrapped
+  const textY = avY + 62;
+  ctx.font = '400 15px monospace';
+  ctx.fillStyle = 'rgba(255,255,255,0.88)';
+  wrapText(ctx, `"${post.text}"`, rightX, textY, rightW, 24, 6);
+
+  // stats row at bottom
+  const statsY = H - 60;
+  ctx.strokeStyle = `rgba(${accRgb},0.15)`;
+  ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(rightX, statsY - 14); ctx.lineTo(W-30, statsY - 14); ctx.stroke();
+
+  // streak
+  ctx.font = '700 28px monospace';
+  ctx.fillStyle = acc;
+  ctx.fillText(streakCount, rightX, statsY + 14);
+  ctx.font = '400 9px monospace';
+  ctx.fillStyle = `rgba(${accRgb},0.6)`;
+  ctx.fillText('STREAK', rightX, statsY + 28);
+
+  // date + time
+  ctx.font = '400 11px monospace';
+  ctx.fillStyle = 'rgba(255,255,255,0.4)';
+  ctx.textAlign = 'right';
+  ctx.fillText(`${post.date} · ${post.time}`, W - 30, statsY + 14);
+  ctx.textAlign = 'left';
+
+  // bottom glow line
+  const gl2 = ctx.createLinearGradient(0,H,W,H);
+  gl2.addColorStop(0,'transparent'); gl2.addColorStop(0.5,`rgba(${accRgb},0.4)`); gl2.addColorStop(1,'transparent');
+  ctx.strokeStyle = gl2; ctx.lineWidth = 1.5;
+  ctx.beginPath(); ctx.moveTo(0,H-1); ctx.lineTo(W,H-1); ctx.stroke();
+
+  // convert to blob and send as photo
+  canvas.toBlob(async (blob) => {
+    if (!blob) return;
+    const form = new FormData();
+    form.append('chat_id', settings.tgChat);
+    form.append('photo', blob, 'epoch_card.jpg');
+    form.append('caption', `${ME} — Day ${post.day} · Streak ${streakCount}`);
+    try {
+      await fetch(`https://api.telegram.org/bot${settings.tgToken}/sendPhoto`, {
+        method: 'POST', body: form
+      });
+    } catch(e) {}
+  }, 'image/jpeg', 0.92);
+}
+
+// helpers
+function hexToRgb(hex) {
+  const r = parseInt(hex.slice(1,3),16), g = parseInt(hex.slice(3,5),16), b = parseInt(hex.slice(5,7),16);
+  return `${r},${g},${b}`;
+}
+function roundRect(ctx, x, y, w, h, r) {
+  ctx.beginPath(); ctx.moveTo(x+r,y); ctx.lineTo(x+w-r,y); ctx.arcTo(x+w,y,x+w,y+r,r);
+  ctx.lineTo(x+w,y+h-r); ctx.arcTo(x+w,y+h,x+w-r,y+h,r); ctx.lineTo(x+r,y+h);
+  ctx.arcTo(x,y+h,x,y+h-r,r); ctx.lineTo(x,y+r); ctx.arcTo(x,y,x+r,y,r); ctx.closePath();
+}
+function wrapText(ctx, text, x, y, maxW, lineH, maxLines) {
+  const words = text.split(' '); let line = '', lines = 0;
+  for (let w of words) {
+    const test = line + w + ' ';
+    if (ctx.measureText(test).width > maxW && line) {
+      ctx.fillText(line.trim(), x, y + lines * lineH);
+      line = w + ' '; lines++;
+      if (lines >= maxLines) { ctx.fillText('...', x, y + lines * lineH); return; }
+    } else line = test;
+  }
+  if (line.trim()) ctx.fillText(line.trim(), x, y + lines * lineH);
 }
 
 // ── GOOGLE DRIVE ──
