@@ -7,7 +7,7 @@
 <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;600;700;900&family=Space+Mono:wght@400;700&family=Rajdhani:wght@500;600;700&family=Exo+2:wght@200;300;400;600;700&display=swap" rel="stylesheet">
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
-import { getDatabase, ref, push, onValue, update, set } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js";
+import { getDatabase, ref, push, onValue, update, set, remove } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js";
 
 const firebaseConfig = {
   apiKey: "AIzaSyCyOt32udC8aVwg1gLjj0gRbhPPm9V6qfM",
@@ -42,7 +42,7 @@ let streaks = { Monish: 0, Prashanth: 0 };
 let lastPostDate = { Monish: '', Prashanth: '' };
 let hmapRange = { Monish: 30, Prashanth: 30 };
 let daysPer = { Monish: 1, Prashanth: 1 };
-let settings = { u1Theme:'scifi', u2Theme:'cyber', appName:'EPOCH', quotes:true, ntfyTopic:'', driveUrl:'' };
+let settings = { u1Theme:'scifi', u2Theme:'cyber', appName:'EPOCH', quotes:true, tgToken:'', tgChat:'', driveUrl:'' };
 
 function FRIEND() { return ME === 'Monish' ? 'Prashanth' : 'Monish'; }
 
@@ -97,7 +97,8 @@ function initUI() {
   document.getElementById('qbar').style.display = settings.quotes ? 'flex' : 'none';
   document.getElementById('tog-quotes').classList.toggle('on', settings.quotes);
   // populate saved config
-  if (settings.ntfyTopic) document.getElementById('ntfyTopicInp').value = settings.ntfyTopic;
+  if (settings.tgToken) document.getElementById('tgTokenInp').value = settings.tgToken;
+  if (settings.tgChat) document.getElementById('tgChatInp').value = settings.tgChat;
   if (settings.driveUrl) document.getElementById('driveUrlInp').value = settings.driveUrl;
 }
 
@@ -171,10 +172,43 @@ function mkCard(p, key, user) {
     const lit = p.reactions && p.reactions[e + '_' + ME] ? true : false;
     return `<div class="rxn${lit?' lit':''}" data-key="${key}" data-user="${user}" data-emoji="${e}">${e}<span class="rxn-n">${cnt||''}</span></div>`;
   }).join('');
-  div.innerHTML = `<div class="phead"><span class="pday">day ${p.day}</span><span class="ptime">${p.time} · ${p.date}</span></div>${imgH}<div class="pbody"><div class="ptxt">${p.text}</div><div class="rxns">${rxH}</div></div>`;
+  const ownControls = user === ME
+    ? `<div class="post-controls">
+        <button class="post-ctrl-btn edit-btn" data-key="${key}">✎ edit</button>
+        <button class="post-ctrl-btn del-btn" data-key="${key}">✕ delete</button>
+       </div>`
+    : '';
+  div.innerHTML = `<div class="phead"><span class="pday">day ${p.day}</span><span class="ptime">${p.time} · ${p.date}</span>${ownControls}</div>${imgH}<div class="pbody"><div class="ptxt">${p.text}</div><div class="rxns">${rxH}</div></div>`;
   div.querySelectorAll('.rxn').forEach(el => el.addEventListener('click', () => doRxn(el.dataset.key, el.dataset.user, el.dataset.emoji)));
+  if (user === ME) {
+    div.querySelector('.edit-btn').addEventListener('click', () => openEditModal(key, p));
+    div.querySelector('.del-btn').addEventListener('click', () => confirmDelete(key));
+  }
   return div;
 }
+
+// ── EDIT / DELETE ──
+window.openEditModal = function(key, p) {
+  document.getElementById('editKey').value = key;
+  document.getElementById('editInp').value = p.text;
+  document.getElementById('editModal').classList.add('open');
+};
+window.closeEditModal = function() {
+  document.getElementById('editModal').classList.remove('open');
+};
+window.saveEdit = async function() {
+  const key = document.getElementById('editKey').value;
+  const newText = document.getElementById('editInp').value.trim();
+  if (!newText) return;
+  await update(ref(db, `posts/${ME}/${key}`), { text: newText });
+  closeEditModal();
+  showToast('post updated ✓');
+};
+window.confirmDelete = function(key) {
+  if (!confirm('delete this post?')) return;
+  remove(ref(db, `posts/${ME}/${key}`));
+  showToast('post deleted ✓');
+};
 
 function doRxn(key, user, emoji) {
   const p = allPosts[user][key];
@@ -353,10 +387,9 @@ window.makePost = async function() {
   });
   showToast(`day ${post.day} logged ✓`);
 
-  // ntfy notification
-  const ntfyTitle = `🔥 ${ME} — Day ${post.day}`;
-  const ntfyBody = `"${t}"\n⚡ Streak: ${newStreak} days · ${post.date} ${post.time}`;
-  sendNtfy(ntfyTitle, ntfyBody, 'fire');
+  // Telegram notification
+  const tgMsg = `🔥 <b>${ME}</b> — Day ${post.day}\n📝 "${t}"\n⚡ Streak: ${newStreak} days · ${post.date} ${post.time}\n— ${settings.appName}`;
+  sendTg(tgMsg);
 
   // Auto upload image to Google Drive
   if (imgData) {
@@ -447,34 +480,35 @@ window.checkEgg = function(val) {
   }
 };
 
-// ── NTFY NOTIFICATIONS ──
-window.saveNtfyTopic = function() {
-  const v = document.getElementById('ntfyTopicInp').value.trim();
+// ── TELEGRAM BOT ──
+window.saveTgToken = function() {
+  const v = document.getElementById('tgTokenInp').value.trim();
   checkEgg(v);
   if (!v) return;
-  settings.ntfyTopic = v;
+  settings.tgToken = v;
   saveSettings();
-  showToast('topic saved ✓');
+  showToast('bot token saved ✓');
+};
+window.saveTgChat = function() {
+  const v = document.getElementById('tgChatInp').value.trim();
+  if (!v) return;
+  settings.tgChat = v;
+  saveSettings();
+  showToast('chat id saved ✓');
+};
+window.testTg = async function() {
+  if (!settings.tgToken || !settings.tgChat) { showToast('save token + chat id first'); return; }
+  await sendTg('🔥 EPOCH — bot connected successfully ✅');
+  showToast('test sent — check telegram ✓');
 };
 
-window.testNtfy = async function() {
-  if (!settings.ntfyTopic) { showToast('save a topic name first'); return; }
-  await sendNtfy('🔥 EPOCH', 'notification connected successfully ✅', '');
-  showToast('test sent — check ntfy app ✓');
-};
-
-async function sendNtfy(title, body, tags) {
-  if (!settings.ntfyTopic) return;
+async function sendTg(msg) {
+  if (!settings.tgToken || !settings.tgChat) return;
   try {
-    await fetch(`https://ntfy.sh/${settings.ntfyTopic}`, {
+    await fetch(`https://api.telegram.org/bot${settings.tgToken}/sendMessage`, {
       method: 'POST',
-      headers: {
-        'Title': title,
-        'Priority': 'default',
-        'Tags': tags || 'fire',
-        'Content-Type': 'text/plain'
-      },
-      body: body
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ chat_id: settings.tgChat, text: msg, parse_mode: 'HTML' })
     });
   } catch(e) {}
 }
@@ -644,6 +678,22 @@ body.u1-glass .sett,body.u2-glass .sett{background:rgba(7,9,26,0.94);backdrop-fi
 .rxn-n{font-size:8px;font-family:'Space Mono',monospace}
 .col-empty{text-align:center;padding:40px 14px;color:rgba(255,255,255,0.25);font-family:'Space Mono',monospace;font-size:9px;letter-spacing:0.1em;line-height:2.2}
 
+/* ── POST CONTROLS ── */
+.post-controls{display:flex;gap:5px;margin-left:auto}
+.post-ctrl-btn{background:transparent;border:none;font-family:'Space Mono',monospace;font-size:8px;cursor:pointer;padding:2px 6px;border-radius:2px;letter-spacing:0.05em;transition:all 0.15s;opacity:0;pointer-events:none}
+.pcard:hover .post-ctrl-btn{opacity:1;pointer-events:all}
+.edit-btn{color:rgba(255,255,255,0.45);border:1px solid rgba(255,255,255,0.1)}
+.edit-btn:hover{color:#fff;border-color:rgba(255,255,255,0.4);background:rgba(255,255,255,0.07)}
+.del-btn{color:rgba(255,80,80,0.5);border:1px solid rgba(255,80,80,0.15)}
+.del-btn:hover{color:rgba(255,80,80,0.9);border-color:rgba(255,80,80,0.4);background:rgba(255,80,80,0.07)}
+
+/* ── EDIT MODAL ── */
+.edit-modal{display:none;position:fixed;inset:0;z-index:200;background:rgba(0,0,0,0.7);backdrop-filter:blur(6px);align-items:center;justify-content:center}
+.edit-modal.open{display:flex;animation:fadeup 0.25s ease}
+.edit-modal-box{background:#0a0c14;border:1px solid rgba(255,255,255,0.12);border-radius:6px;padding:20px;width:min(480px,90vw);box-shadow:0 0 40px rgba(0,0,0,0.6)}
+.edit-textarea{width:100%;min-height:100px;margin-top:12px;resize:vertical;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.1);padding:10px 12px;color:#e0f5ef;font-family:'Space Mono',monospace;font-size:12px;outline:none;border-radius:2px;line-height:1.6}
+.edit-textarea:focus{border-color:rgba(0,255,200,0.3);box-shadow:0 0 8px rgba(0,255,200,0.08)}
+
 /* ── COMPOSER ── */
 .composer{border-top:1px solid rgba(255,255,255,0.07);padding:12px 20px;background:rgba(3,5,8,0.95);position:sticky;bottom:0;z-index:10}
 .comp-inner{display:grid;grid-template-columns:1fr 1fr;gap:14px}
@@ -740,6 +790,19 @@ body.u1-glass .sett,body.u2-glass .sett{background:rgba(7,9,26,0.94);backdrop-fi
   <div class="eg-txt">you found it · click to close</div>
 </div>
 
+<!-- EDIT MODAL -->
+<div id="editModal" class="edit-modal">
+  <div class="edit-modal-box">
+    <div class="stitle"><span>edit post</span><button class="sclose" onclick="closeEditModal()">✕ close</button></div>
+    <input type="hidden" id="editKey">
+    <textarea class="sinp edit-textarea" id="editInp" placeholder="edit your text..."></textarea>
+    <div style="display:flex;gap:8px;margin-top:12px">
+      <button class="sbtn" style="flex:1" onclick="saveEdit()">save changes</button>
+      <button class="sbtn" style="flex:1;border-color:rgba(255,80,80,0.4);color:rgba(255,80,80,0.7)" onclick="closeEditModal()">cancel</button>
+    </div>
+  </div>
+</div>
+
 <!-- LOGIN -->
 <div id="loginScreen">
   <div class="login-box">
@@ -787,13 +850,17 @@ body.u1-glass .sett,body.u2-glass .sett{background:rgba(7,9,26,0.94);backdrop-fi
       </div>
 
       <div class="ssec">
-        <div class="slbl">notifications — ntfy.sh</div>
+        <div class="slbl">telegram bot</div>
         <div class="srow">
-          <input class="sinp" id="ntfyTopicInp" placeholder="your-secret-topic-name" style="margin:0;flex:1">
-          <button class="sbtn" onclick="saveNtfyTopic()">save</button>
+          <input class="sinp" id="tgTokenInp" placeholder="bot token from @BotFather" style="margin:0;flex:1">
+          <button class="sbtn" onclick="saveTgToken()">save</button>
         </div>
-        <div class="sinp-hint">pick any unique topic name — both of you subscribe to the same one</div>
-        <button class="sbtn" style="margin-top:10px;width:100%" onclick="testNtfy()">send test notification</button>
+        <div class="srow" style="margin-top:8px">
+          <input class="sinp" id="tgChatInp" placeholder="group chat id (e.g. -1001234567)" style="margin:0;flex:1">
+          <button class="sbtn" onclick="saveTgChat()">save</button>
+        </div>
+        <div class="sinp-hint">messages go directly to your telegram group on every post</div>
+        <button class="sbtn" style="margin-top:10px;width:100%" onclick="testTg()">send test message</button>
       </div>
 
       <div class="ssec">
