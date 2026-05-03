@@ -129,8 +129,10 @@ function listenFirebase() {
 function updateStats() {
   const myPosts = Object.values(allPosts[ME] || {});
   const frPosts = Object.values(allPosts[FRIEND()] || {});
-  document.getElementById('umeta1').textContent = `day ${myPosts.length} · ${myPosts.length} posts`;
-  document.getElementById('umeta2').textContent = `day ${frPosts.length} · ${frPosts.length} posts`;
+  const myMaxDay = myPosts.length ? Math.max(...myPosts.map(p => p.day || 0)) : 0;
+  const frMaxDay = frPosts.length ? Math.max(...frPosts.map(p => p.day || 0)) : 0;
+  document.getElementById('umeta1').textContent = `day ${myMaxDay} · ${myPosts.length} posts`;
+  document.getElementById('umeta2').textContent = `day ${frMaxDay} · ${frPosts.length} posts`;
   document.getElementById('us1n').textContent = streaks[ME] || 0;
   document.getElementById('us2n').textContent = streaks[FRIEND()] || 0;
   document.getElementById('hmapStat1').textContent = `${myPosts.length} posts total`;
@@ -204,9 +206,45 @@ window.saveEdit = async function() {
   closeEditModal();
   showToast('post updated ✓');
 };
-window.confirmDelete = function(key) {
+window.confirmDelete = async function(key) {
   if (!confirm('delete this post?')) return;
-  remove(ref(db, `posts/${ME}/${key}`));
+  await remove(ref(db, `posts/${ME}/${key}`));
+
+  // recalculate streak from remaining posts
+  const remaining = Object.values(allPosts[ME] || {}).filter(p => {
+    // allPosts is updated by onValue listener but may lag — exclude deleted key manually
+    return true; // onValue will re-fire after remove, recalc runs fresh there
+  });
+
+  // get unique post days from remaining posts minus the deleted one
+  const remainingEntries = Object.entries(allPosts[ME] || {}).filter(([k]) => k !== key);
+  const uniqueDays = [...new Set(remainingEntries.map(([, p]) => new Date(p.ts).toDateString()))].sort((a,b) => new Date(b) - new Date(a));
+
+  // recalculate streak: count consecutive days from today backwards
+  let newStreak = 0;
+  const today = new Date().toDateString();
+  let check = new Date();
+  for (let i = 0; i < uniqueDays.length; i++) {
+    const expected = check.toDateString();
+    if (uniqueDays[i] === expected) {
+      newStreak++;
+      check.setDate(check.getDate() - 1);
+    } else if (uniqueDays[i] === today) {
+      // today matches but check moved past — reset check
+      newStreak++;
+      check = new Date();
+      check.setDate(check.getDate() - 1);
+    } else {
+      break; // streak broken
+    }
+  }
+
+  const newLast = uniqueDays.length > 0 ? uniqueDays[0] : '';
+  await update(ref(db, 'streaks'), {
+    [ME]: newStreak,
+    ['last' + ME]: newLast
+  });
+
   showToast('post deleted ✓');
 };
 
@@ -368,9 +406,10 @@ window.makePost = async function() {
   const myStreak = streaks[ME] || 0;
   const myLast = lastPostDate[ME] || '';
   const newStreak = myLast === today ? myStreak : myStreak + 1;
+  const maxDay = myPosts.length ? Math.max(...myPosts.map(p => p.day || 0)) : 0;
   const post = {
     text: t,
-    day: myPosts.length + 1,
+    day: maxDay + 1,
     time: now.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}),
     date: now.toLocaleDateString([], {day:'numeric', month:'short'}),
     ts: Date.now(),
