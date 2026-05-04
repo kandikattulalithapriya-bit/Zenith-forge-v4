@@ -26,14 +26,22 @@ const USERS = ['Monish','Prashanth'];
 const EMOJIS = ['🔥','💀','⚡','🫡','👁️','🏆'];
 const QUOTES = ["the work is the proof.","consistency is the only currency that compounds.","what you do in silence becomes your loudest statement.","discipline is remembering what you want.","to exist is to iterate.","make it, make it — the rest is noise.","your craft is your autobiography.","great things are forged in ordinary moments.","the present moment always will have been.","an epoch is built one day at a time.","output is the only metric that matters.","mastery is the compound interest of effort."];
 const RANGES = [{l:'30d',d:30},{l:'2m',d:60},{l:'3m',d:90},{l:'6m',d:180},{l:'1yr',d:365}];
-const THEMES = [
-  {id:'scifi',    label:'sci-fi',     dot:'#00ffc8', bg:'#030508'},
-  {id:'cyber',    label:'cyber',      dot:'#ff00cc', bg:'#08000f'},
-  {id:'space',    label:'space',      dot:'#88c0ff', bg:'#020410'},
-  {id:'forge',    label:'forge',      dot:'#ffaa00', bg:'#090600'},
-  {id:'void',     label:'void',       dot:'#c8c8c8', bg:'#070707'},
-  {id:'glass',    label:'glass ✦',   dot:'#4dc8ff', bg:'#07091a'},
-  {id:'terminal', label:'terminal ▓', dot:'#7b5cf0', bg:'#000000'},
+// UI styles — overall look
+const UI_STYLES = [
+  {id:'default',  label:'DEFAULT',  sub:'sci-fi hud',    dot:'#00ffc8', bg:'#030508'},
+  {id:'terminal', label:'TERMINAL', sub:'crt phosphor',  dot:'#7b5cf0', bg:'#000000'},
+  {id:'glass',    label:'GLASS',    sub:'frosted panels', dot:'#4dc8ff', bg:'#07091a'},
+];
+// Colors — accent per side
+const COLORS = [
+  {id:'cyan',    label:'cyan',    dot:'#00ffc8'},
+  {id:'magenta', label:'magenta', dot:'#ff00cc'},
+  {id:'blue',    label:'blue',    dot:'#88c0ff'},
+  {id:'amber',   label:'amber',   dot:'#ffaa00'},
+  {id:'white',   label:'white',   dot:'#c8c8c8'},
+  {id:'purple',  label:'purple',  dot:'#7b5cf0'},
+  {id:'green',   label:'green',   dot:'#39ff14'},
+  {id:'red',     label:'red',     dot:'#ff4444'},
 ];
 
 let ME = null;
@@ -43,7 +51,7 @@ let streaks = { Monish: 0, Prashanth: 0 };
 let lastPostDate = { Monish: '', Prashanth: '' };
 let hmapRange = { Monish: 30, Prashanth: 30 };
 let daysPer = { Monish: 1, Prashanth: 1 };
-let settings = { u1Theme:'scifi', u2Theme:'cyber', appName:'EPOCH', quotes:true, tgToken:'', tgChat:'', driveUrl:'' };
+let settings = { uiStyle:'default', u1Color:'cyan', u2Color:'magenta', appName:'EPOCH', quotes:true, tgToken:'', tgChat:'', driveUrl:'' };
 
 function FRIEND() { return ME === 'Monish' ? 'Prashanth' : 'Monish'; }
 
@@ -63,8 +71,9 @@ window.bootAs = function(name) {
 
 window.addEventListener('DOMContentLoaded', () => {
   loadSettings();
-  applyTheme('u1', settings.u1Theme, false);
-  applyTheme('u2', settings.u2Theme, false);
+  applyUIStyle(settings.uiStyle || 'default', false);
+  applyColor('u1', settings.u1Color || 'cyan', false);
+  applyColor('u2', settings.u2Color || 'magenta', false);
   const saved = localStorage.getItem('epoch_me');
   if (saved && USERS.includes(saved)) {
     document.getElementById('loginScreen').style.display = 'none';
@@ -73,7 +82,6 @@ window.addEventListener('DOMContentLoaded', () => {
     initUI();
     listenFirebase();
   }
-  // update quote every 30s
   setInterval(updateQuote, 30000);
 });
 
@@ -94,7 +102,7 @@ function initUI() {
   // logout btn
   document.getElementById('logoutBtn').textContent = 'logout (' + ME + ')';
   updateQuote();
-  buildTGrids();
+  buildTGrids(); // builds style grid + color grids
   document.getElementById('qbar').style.display = settings.quotes ? 'flex' : 'none';
   document.getElementById('tog-quotes').classList.toggle('on', settings.quotes);
   // populate saved config
@@ -482,33 +490,73 @@ window.logout = function() {
 };
 
 // ── THEMES ──
-function applyTheme(col, themeId, save=true) {
-  THEMES.forEach(t => document.body.classList.remove(col + '-' + t.id));
-  if (!(col === 'u1' && themeId === 'scifi')) document.body.classList.add(col + '-' + themeId);
-  if (col === 'u1') settings.u1Theme = themeId;
-  else settings.u2Theme = themeId;
-  if (save) { saveSettings(); buildTGrids(); }
-}
-window.applyThemeW = applyTheme;
+const COLOR_HEX = { cyan:'#00ffc8', magenta:'#ff00cc', blue:'#88c0ff', amber:'#ffaa00', white:'#c8c8c8', purple:'#7b5cf0', green:'#39ff14', red:'#ff4444' };
 
-function buildTGrids() {
-  buildTGrid('u1', 'tgrid-u1', settings.u1Theme);
-  buildTGrid('u2', 'tgrid-u2', settings.u2Theme);
+function hexToRgbArr(hex) {
+  return [parseInt(hex.slice(1,3),16), parseInt(hex.slice(3,5),16), parseInt(hex.slice(5,7),16)];
 }
 
-function buildTGrid(col, elId, sel) {
-  const g = document.getElementById(elId);
+function applyUIStyle(styleId, save=true) {
+  UI_STYLES.forEach(s => document.body.classList.remove('ui-'+s.id));
+  document.body.classList.add('ui-'+styleId);
+  settings.uiStyle = styleId;
+  if (save) { saveSettings(); buildStyleGrid(); buildColorGrids(); }
+}
+
+function applyColor(col, colorId, save=true) {
+  if (col === 'u1') settings.u1Color = colorId;
+  else settings.u2Color = colorId;
+  const hex = COLOR_HEX[colorId] || '#00ffc8';
+  const [r,g,b] = hexToRgbArr(hex);
+  // inject CSS vars directly on :root
+  const varPfx = '--'+col;
+  document.documentElement.style.setProperty(varPfx+'-acc', hex);
+  document.documentElement.style.setProperty(varPfx+'-acc2', `rgba(${r},${g},${b},0.09)`);
+  document.documentElement.style.setProperty(varPfx+'-accl', `rgba(${r},${g},${b},0.22)`);
+  document.documentElement.style.setProperty(varPfx+'-brd', `rgba(${r},${g},${b},0.12)`);
+  document.documentElement.style.setProperty(varPfx+'-brd2', `rgba(${r},${g},${b},0.28)`);
+  document.documentElement.style.setProperty(varPfx+'-glow', `0 0 18px rgba(${r},${g},${b},0.28),0 0 55px rgba(${r},${g},${b},0.09)`);
+  if (save) { saveSettings(); buildColorGrids(); }
+}
+window.applyThemeW = (col, id) => applyColor(col, id); // legacy compat
+
+function buildStyleGrid() {
+  const g = document.getElementById('uiStyleGrid');
   if (!g) return;
   g.innerHTML = '';
-  THEMES.forEach(th => {
+  UI_STYLES.forEach(s => {
     const b = document.createElement('div');
-    b.className = 'tbtn' + (th.id === sel ? ' sel' : '');
-    b.style.background = th.bg;
-    b.innerHTML = `<div class="tdot" style="background:${th.dot}"></div>${th.label}`;
-    b.onclick = () => applyTheme(col, th.id);
+    b.className = 'ui-style-btn' + (s.id === settings.uiStyle ? ' sel' : '');
+    b.innerHTML = `<div class="ui-style-dot" style="background:${s.dot}"></div><div><div class="ui-style-lbl">${s.label}</div><div class="ui-style-sub">${s.sub}</div></div>`;
+    b.onclick = () => applyUIStyle(s.id);
     g.appendChild(b);
   });
 }
+
+function buildColorGrids() {
+  buildColorGrid('u1', 'cgrid-u1', settings.u1Color);
+  buildColorGrid('u2', 'cgrid-u2', settings.u2Color);
+  const l1 = document.getElementById('colorLbl1');
+  const l2 = document.getElementById('colorLbl2');
+  if (l1) l1.textContent = (ME || 'your') + ' side';
+  if (l2) l2.textContent = (ME ? (ME==='Monish'?'Prashanth':'Monish') : "friend's") + ' side';
+}
+
+function buildColorGrid(col, elId, sel) {
+  const g = document.getElementById(elId);
+  if (!g) return;
+  g.innerHTML = '';
+  COLORS.forEach(c => {
+    const b = document.createElement('div');
+    b.className = 'cbtn' + (c.id === sel ? ' sel' : '');
+    b.style.setProperty('--cdot', c.dot);
+    b.title = c.label;
+    b.onclick = () => applyColor(col, c.id);
+    g.appendChild(b);
+  });
+}
+
+function buildTGrids() { buildStyleGrid(); buildColorGrids(); } // keep compat call
 
 // ── SEARCH ──
 let searchFilter = 'both';
@@ -586,32 +634,32 @@ window.generatePDF = async function() {
   const inclImg = document.getElementById('tog-expimg').classList.contains('on');
   const inclRxn = document.getElementById('tog-exprxn').classList.contains('on');
 
+  // open window FIRST synchronously to avoid popup blocker
+  const w = window.open('', '_blank');
+  if (!w) { showToast('allow popups for this site to export pdf'); return; }
+  w.document.write('<html><body style="background:#030508;color:#7b5cf0;font-family:monospace;padding:40px;text-align:center;letter-spacing:0.2em">GENERATING JOURNAL...</body></html>');
+
   btn.disabled = true;
   document.getElementById('expBtnTxt').textContent = '⏳ generating...';
   status.textContent = '';
   progress.style.display = 'block';
 
-  const setProgress = (pct, text) => {
-    bar.style.width = pct + '%';
-    lbl.textContent = text;
-  };
+  const setProgress = (pct, text) => { bar.style.width = pct + '%'; lbl.textContent = text; };
 
   setProgress(10, 'collecting posts...');
-  await new Promise(r => setTimeout(r, 80));
+  await new Promise(r => setTimeout(r, 60));
 
   const users = exportTarget === 'both' ? [ME, FRIEND()] : exportTarget === 'me' ? [ME] : [FRIEND()];
   let allEntries = [];
-  users.forEach(user => {
-    Object.entries(allPosts[user]||{}).forEach(([k,p]) => allEntries.push({user,p}));
-  });
+  users.forEach(user => Object.entries(allPosts[user]||{}).forEach(([k,p]) => allEntries.push({user,p})));
   allEntries.sort((a,b) => a.p.ts - b.p.ts);
 
   setProgress(25, 'building layout...');
-  await new Promise(r => setTimeout(r, 80));
+  await new Promise(r => setTimeout(r, 60));
 
-  const themeColors = { scifi:'#00ffc8', cyber:'#ff00cc', space:'#88c0ff', forge:'#ffaa00', void:'#c8c8c8', glass:'#4dc8ff', terminal:'#7b5cf0' };
-  const acc1 = themeColors[settings.u1Theme] || '#00ffc8';
-  const acc2 = themeColors[settings.u2Theme] || '#ff00cc';
+  const themeColors = { cyan:'#00ffc8', magenta:'#ff00cc', blue:'#88c0ff', amber:'#ffaa00', white:'#c8c8c8', purple:'#7b5cf0', green:'#39ff14', red:'#ff4444' };
+  const acc1 = themeColors[settings.u1Color] || '#00ffc8';
+  const acc2 = themeColors[settings.u2Color] || '#ff00cc';
 
   let rows = '';
   const total = allEntries.length;
@@ -619,59 +667,45 @@ window.generatePDF = async function() {
     const {user, p} = allEntries[i];
     const acc = user === ME ? acc1 : acc2;
     const rxnHtml = inclRxn && p.reactions
-      ? Object.entries(p.reactions).filter(([k])=>!k.includes('_')).map(([e,c])=>`<span style="margin-right:6px">${e} ${c}</span>`).join('')
-      : '';
+      ? Object.entries(p.reactions).filter(([k])=>!k.includes('_')).map(([e,c])=>`<span style="margin-right:6px">${e} ${c}</span>`).join('') : '';
     const imgHtml = inclImg && p.img
-      ? `<img src="${p.img}" style="width:100%;max-height:220px;object-fit:contain;background:#000;border-radius:4px;margin-top:10px;display:block">`
-      : '';
-    rows += `
-      <div style="border:1px solid ${acc}33;border-radius:6px;padding:16px;margin-bottom:14px;background:#07090f;break-inside:avoid">
-        <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
-          <span style="font-family:monospace;font-size:11px;font-weight:700;color:${acc};background:${acc}18;border:1px solid ${acc}44;padding:2px 8px;border-radius:2px">${user}</span>
-          <span style="font-family:monospace;font-size:11px;color:${acc};font-weight:700">DAY ${p.day}</span>
-          <span style="font-family:monospace;font-size:9px;color:#ffffff55;margin-left:auto">${p.date} · ${p.time}</span>
-        </div>
-        <div style="font-size:13px;line-height:1.7;color:#ddd">${p.text}</div>
-        ${rxnHtml ? `<div style="margin-top:8px;font-size:12px;color:#ffffff66">${rxnHtml}</div>` : ''}
-        ${imgHtml}
-      </div>`;
-    const pct = 25 + Math.round((i / total) * 55);
-    setProgress(pct, `processing ${i+1} of ${total} posts...`);
-    if (i % 5 === 0) await new Promise(r => setTimeout(r, 10));
+      ? `<img src="${p.img}" style="width:100%;max-height:220px;object-fit:contain;background:#000;border-radius:4px;margin-top:10px;display:block">` : '';
+    rows += `<div style="border:1px solid ${acc}33;border-radius:6px;padding:16px;margin-bottom:14px;background:#07090f;break-inside:avoid">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
+        <span style="font-family:monospace;font-size:11px;font-weight:700;color:${acc};background:${acc}18;border:1px solid ${acc}44;padding:2px 8px;border-radius:2px">${user}</span>
+        <span style="font-family:monospace;font-size:11px;color:${acc};font-weight:700">DAY ${p.day}</span>
+        <span style="font-family:monospace;font-size:9px;color:#ffffff55;margin-left:auto">${p.date} · ${p.time}</span>
+      </div>
+      <div style="font-size:13px;line-height:1.7;color:#ddd">${p.text}</div>
+      ${rxnHtml ? `<div style="margin-top:8px;font-size:12px;color:#ffffff66">${rxnHtml}</div>` : ''}
+      ${imgHtml}
+    </div>`;
+    setProgress(25 + Math.round((i/total)*60), `processing ${i+1} of ${total}...`);
+    if (i % 5 === 0) await new Promise(r => setTimeout(r, 8));
   }
 
-  setProgress(85, 'rendering document...');
-  await new Promise(r => setTimeout(r, 100));
+  setProgress(90, 'writing document...');
+  await new Promise(r => setTimeout(r, 60));
 
-  const html = `<!DOCTYPE html><html><head><meta charset="UTF-8">
-  <title>${settings.appName} — Progress Journal</title>
-  <style>
-    *{box-sizing:border-box;margin:0;padding:0}
-    body{background:#030508;color:#e0f5ef;font-family:monospace;padding:30px;max-width:800px;margin:0 auto}
-    h1{font-size:28px;color:${acc1};letter-spacing:0.2em;margin-bottom:4px}
-    .sub{font-size:11px;color:#ffffff44;letter-spacing:0.1em;margin-bottom:30px}
-    @media print{body{background:#030508!important;-webkit-print-color-adjust:exact;print-color-adjust:exact}}
-  </style></head><body>
-  <h1>${settings.appName}</h1>
-  <div class="sub">progress journal · ${allEntries.length} entries · generated ${new Date().toLocaleDateString([],{day:'numeric',month:'long',year:'numeric'})}</div>
-  ${rows}
-  </body></html>`;
+  const fullHtml = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>${settings.appName} — Journal</title>
+  <style>*{box-sizing:border-box;margin:0;padding:0}body{background:#030508;color:#e0f5ef;font-family:monospace;padding:30px;max-width:800px;margin:0 auto}
+  h1{font-size:26px;color:${acc1};letter-spacing:0.2em;margin-bottom:4px}.sub{font-size:10px;color:#ffffff44;letter-spacing:0.1em;margin-bottom:28px}
+  @media print{body{background:#030508!important;-webkit-print-color-adjust:exact;print-color-adjust:exact}}</style></head>
+  <body><h1>${settings.appName}</h1>
+  <div class="sub">progress journal · ${allEntries.length} entries · ${new Date().toLocaleDateString([],{day:'numeric',month:'long',year:'numeric'})}</div>
+  ${rows}</body></html>`;
 
-  setProgress(95, 'opening print dialog...');
-  await new Promise(r => setTimeout(r, 150));
-
-  const w = window.open('', '_blank');
-  w.document.write(html);
+  w.document.open();
+  w.document.write(fullHtml);
   w.document.close();
-  setTimeout(() => { w.print(); }, 600);
+  setTimeout(() => { try { w.print(); } catch(e){} }, 500);
 
   setProgress(100, 'done ✓');
-  await new Promise(r => setTimeout(r, 800));
-
+  await new Promise(r => setTimeout(r, 700));
   btn.disabled = false;
   document.getElementById('expBtnTxt').textContent = '⬇ generate pdf';
   progress.style.display = 'none';
-  status.textContent = `✓ ${allEntries.length} posts exported — use "save as pdf" in print dialog`;
+  status.textContent = `✓ ${allEntries.length} posts — use ctrl+p or save as pdf in the new tab`;
 };
 
 // ── TERMINAL WAVEFORM ──
@@ -983,7 +1017,31 @@ body.u2-void{--u2-acc:#c8c8c8;--u2-acc2:rgba(200,200,200,0.06);--u2-accl:rgba(20
 body.u2-glass{--u2-acc:#c77dff;--u2-acc2:rgba(199,125,255,0.12);--u2-accl:rgba(199,125,255,0.25);--u2-brd:rgba(255,255,255,0.14);--u2-brd2:rgba(255,255,255,0.26);--u2-glow:0 0 24px rgba(199,125,255,0.35),0 0 60px rgba(199,125,255,0.12);--u2-bg:rgba(30,10,60,0.3);--u2-bg2:rgba(40,15,80,0.35)}
 body.u1-glass,body.u2-glass{background:#07091a!important}
 
-/* ── GLASS FIX — proper frosted glass ── */
+/* ── UI STYLE BODY CLASSES ── */
+body.ui-terminal{background:#000!important}
+body.ui-terminal *{font-family:'Courier New',Courier,monospace!important}
+body.ui-terminal::after{content:'';pointer-events:none;position:fixed;inset:0;z-index:9999;background:repeating-linear-gradient(0deg,transparent,transparent 2px,rgba(0,0,0,0.15) 2px,rgba(0,0,0,0.15) 4px);animation:scanroll 8s linear infinite}
+@keyframes scanroll{from{background-position:0 0}to{background-position:0 100px}}
+body.ui-terminal .pcard{border-radius:0!important;border-style:solid!important}
+body.ui-terminal .col{border-right:1px dashed rgba(123,92,240,0.25)!important}
+body.ui-terminal .hdr{border-bottom:1px dashed rgba(123,92,240,0.35)!important;background:#000!important}
+body.ui-terminal .phead{border-bottom:1px dashed rgba(255,255,255,0.1)!important}
+body.ui-terminal .ptxt{font-size:11px!important;line-height:1.9!important}
+body.ui-terminal .pimg-wrap img{filter:contrast(1.2) brightness(0.82) saturate(0) sepia(0.4) hue-rotate(220deg)!important;image-rendering:pixelated}
+body.ui-terminal .col-header{background:#000!important}
+body.ui-terminal .ntabs{background:#000!important;border-bottom:1px dashed rgba(255,255,255,0.12)!important}
+body.ui-terminal .hdr-logo{letter-spacing:0.35em!important}
+body.ui-terminal .term-wave{display:block!important}
+
+body.ui-glass{background:linear-gradient(135deg,#06091a 0%,#0a0520 50%,#050d1c 100%)!important}
+body.ui-glass .pcard{backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);background:rgba(255,255,255,0.06)!important;border-color:rgba(255,255,255,0.14)!important;border-radius:8px!important}
+body.ui-glass .col{background:rgba(255,255,255,0.02)!important}
+body.ui-glass .col-header{backdrop-filter:blur(20px);background:rgba(255,255,255,0.04)!important;border-color:rgba(255,255,255,0.1)!important}
+body.ui-glass .hdr{backdrop-filter:blur(20px);background:rgba(5,8,20,0.7)!important;border-bottom:1px solid rgba(255,255,255,0.08)!important}
+body.ui-glass .ntabs{background:rgba(5,8,20,0.6)!important;backdrop-filter:blur(12px)}
+body.ui-glass .composer{backdrop-filter:blur(20px);background:rgba(5,8,20,0.65)!important;border-top:1px solid rgba(255,255,255,0.08)!important}
+body.ui-glass .sett{backdrop-filter:blur(30px)}
+body.ui-glass .sett .sinn{background:rgba(8,12,28,0.85)!important;border:1px solid rgba(255,255,255,0.12)!important}
 body.u1-glass{--u1-acc:#4dc8ff;--u1-acc2:rgba(77,200,255,0.1);--u1-accl:rgba(77,200,255,0.22);--u1-brd:rgba(255,255,255,0.18);--u1-brd2:rgba(255,255,255,0.32);--u1-glow:0 0 24px rgba(77,200,255,0.4),0 0 70px rgba(77,200,255,0.12);--u1-bg:rgba(255,255,255,0.06);--u1-bg2:rgba(255,255,255,0.09)}
 body.u2-glass{--u2-acc:#c77dff;--u2-acc2:rgba(199,125,255,0.1);--u2-accl:rgba(199,125,255,0.22);--u2-brd:rgba(255,255,255,0.18);--u2-brd2:rgba(255,255,255,0.32);--u2-glow:0 0 24px rgba(199,125,255,0.4),0 0 70px rgba(199,125,255,0.12);--u2-bg:rgba(255,255,255,0.06);--u2-bg2:rgba(255,255,255,0.09)}
 body.u1-glass .col-u1,body.u1-glass .pcard{backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px)}
@@ -1275,6 +1333,21 @@ body.u1-glass .sett,body.u2-glass .sett{background:rgba(7,9,26,0.94);backdrop-fi
 .tbtn{border-radius:3px;cursor:pointer;border:1px solid rgba(255,255,255,0.08);padding:9px 5px 7px;display:flex;flex-direction:column;align-items:center;gap:4px;font-family:'Space Mono',monospace;font-size:7px;color:rgba(255,255,255,0.45);transition:all 0.2s}
 .tbtn:hover{border-color:rgba(255,255,255,0.2);color:rgba(255,255,255,0.7)}
 .tbtn.sel{border-color:white!important;color:white!important}
+/* ui style grid */
+.ssubl{font-family:'Space Mono',monospace;font-size:8px;color:rgba(255,255,255,0.3);letter-spacing:0.08em;margin-bottom:10px}
+.ui-style-grid{display:flex;flex-direction:column;gap:6px}
+.ui-style-btn{display:flex;align-items:center;gap:12px;padding:10px 12px;border:1px solid rgba(255,255,255,0.08);border-radius:3px;cursor:pointer;transition:all 0.2s;background:rgba(255,255,255,0.02)}
+.ui-style-btn:hover{border-color:rgba(255,255,255,0.2);background:rgba(255,255,255,0.05)}
+.ui-style-btn.sel{border-color:var(--u1-acc);background:var(--u1-acc2);box-shadow:var(--u1-glow)}
+.ui-style-lbl{font-family:'Orbitron',monospace;font-size:10px;font-weight:700;color:#fff;letter-spacing:0.12em}
+.ui-style-sub{font-family:'Space Mono',monospace;font-size:8px;color:rgba(255,255,255,0.4);margin-top:2px}
+/* color split */
+.color-split{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.color-col-lbl{font-family:'Space Mono',monospace;font-size:8px;letter-spacing:0.1em;color:rgba(255,255,255,0.5);margin-bottom:8px;text-transform:uppercase}
+.cgrid{display:flex;flex-wrap:wrap;gap:6px}
+.cbtn{width:28px;height:28px;border-radius:50%;cursor:pointer;border:2px solid transparent;transition:all 0.18s;box-shadow:0 0 0 0 currentColor}
+.cbtn:hover{transform:scale(1.18)}
+.cbtn.sel{border-color:#fff;outline:2px solid rgba(255,255,255,0.2);outline-offset:2px}
 .tdot{width:9px;height:9px;border-radius:50%;flex-shrink:0}
 
 /* ── HEATMAP ── */
@@ -1359,6 +1432,7 @@ body.u1-glass .sett,body.u2-glass .sett{background:rgba(7,9,26,0.94);backdrop-fi
     <div class="sinn">
       <div class="stitle"><span>system config</span><button class="sclose" onclick="togSett()">✕ close</button></div>
 
+      <!-- APP NAME -->
       <div class="ssec">
         <div class="slbl">app name</div>
         <div class="srow">
@@ -1367,13 +1441,30 @@ body.u1-glass .sett,body.u2-glass .sett{background:rgba(7,9,26,0.94);backdrop-fi
         </div>
       </div>
 
+      <!-- UI STYLE -->
       <div class="ssec">
-        <div class="slbl">your theme (left column)</div>
-        <div class="tgrid" id="tgrid-u1"></div>
-        <div class="slbl" style="margin-top:14px">friend theme (right column)</div>
-        <div class="tgrid" id="tgrid-u2"></div>
+        <div class="slbl">ui style</div>
+        <div class="ssubl">changes the overall look and feel of the app</div>
+        <div class="ui-style-grid" id="uiStyleGrid"></div>
       </div>
 
+      <!-- COLORS -->
+      <div class="ssec">
+        <div class="slbl">colors</div>
+        <div class="ssubl">accent color for each side — independent of ui style</div>
+        <div class="color-split">
+          <div class="color-col">
+            <div class="color-col-lbl" id="colorLbl1">your side</div>
+            <div class="cgrid" id="cgrid-u1"></div>
+          </div>
+          <div class="color-col">
+            <div class="color-col-lbl" id="colorLbl2">friend's side</div>
+            <div class="cgrid" id="cgrid-u2"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- TOGGLES -->
       <div class="ssec">
         <div class="slbl">toggles</div>
         <div class="trow">
@@ -1382,6 +1473,7 @@ body.u1-glass .sett,body.u2-glass .sett{background:rgba(7,9,26,0.94);backdrop-fi
         </div>
       </div>
 
+      <!-- TELEGRAM -->
       <div class="ssec">
         <div class="slbl">telegram bot</div>
         <div class="srow">
@@ -1396,19 +1488,22 @@ body.u1-glass .sett,body.u2-glass .sett{background:rgba(7,9,26,0.94);backdrop-fi
         <button class="sbtn" style="margin-top:10px;width:100%" onclick="testTg()">send test message</button>
       </div>
 
+      <!-- GOOGLE DRIVE -->
       <div class="ssec">
         <div class="slbl">google drive backup</div>
         <div class="srow">
           <input class="sinp" id="driveUrlInp" placeholder="paste apps script web app url" style="margin:0;flex:1">
           <button class="sbtn" onclick="saveDriveUrl()">save</button>
         </div>
-        <div class="sinp-hint">see setup guide — images auto-upload on every post</div>
+        <div class="sinp-hint">images auto-upload to drive on every post</div>
       </div>
 
+      <!-- HIDDEN EGG -->
       <div class="ssec" style="display:none">
         <input class="sinp" id="eggInp" placeholder="" oninput="checkEgg(this.value)">
       </div>
 
+      <!-- DANGER -->
       <div class="ssec">
         <div class="slbl">danger zone</div>
         <button class="sbtn" onclick="logout()" style="border-color:rgba(255,80,80,0.4);color:rgba(255,80,80,0.7)">switch user</button>
