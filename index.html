@@ -27,12 +27,13 @@ const EMOJIS = ['🔥','💀','⚡','🫡','👁️','🏆'];
 const QUOTES = ["the work is the proof.","consistency is the only currency that compounds.","what you do in silence becomes your loudest statement.","discipline is remembering what you want.","to exist is to iterate.","make it, make it — the rest is noise.","your craft is your autobiography.","great things are forged in ordinary moments.","the present moment always will have been.","an epoch is built one day at a time.","output is the only metric that matters.","mastery is the compound interest of effort."];
 const RANGES = [{l:'30d',d:30},{l:'2m',d:60},{l:'3m',d:90},{l:'6m',d:180},{l:'1yr',d:365}];
 const THEMES = [
-  {id:'scifi', label:'sci-fi', dot:'#00ffc8', bg:'#030508'},
-  {id:'cyber', label:'cyber',  dot:'#ff00cc', bg:'#08000f'},
-  {id:'space', label:'space',  dot:'#88c0ff', bg:'#020410'},
-  {id:'forge', label:'forge',  dot:'#ffaa00', bg:'#090600'},
-  {id:'void',  label:'void',   dot:'#c8c8c8', bg:'#070707'},
-  {id:'glass', label:'glass ✦',dot:'#4dc8ff', bg:'#07091a'},
+  {id:'scifi',    label:'sci-fi',     dot:'#00ffc8', bg:'#030508'},
+  {id:'cyber',    label:'cyber',      dot:'#ff00cc', bg:'#08000f'},
+  {id:'space',    label:'space',      dot:'#88c0ff', bg:'#020410'},
+  {id:'forge',    label:'forge',      dot:'#ffaa00', bg:'#090600'},
+  {id:'void',     label:'void',       dot:'#c8c8c8', bg:'#070707'},
+  {id:'glass',    label:'glass ✦',   dot:'#4dc8ff', bg:'#07091a'},
+  {id:'terminal', label:'terminal ▓', dot:'#7b5cf0', bg:'#000000'},
 ];
 
 let ME = null;
@@ -579,11 +580,24 @@ window.updateExportCounts = function() {
 window.generatePDF = async function() {
   const btn = document.getElementById('expBtn');
   const status = document.getElementById('expStatus');
+  const progress = document.getElementById('expProgress');
+  const bar = document.getElementById('expProgressBar');
+  const lbl = document.getElementById('expProgressLbl');
   const inclImg = document.getElementById('tog-expimg').classList.contains('on');
   const inclRxn = document.getElementById('tog-exprxn').classList.contains('on');
+
   btn.disabled = true;
   document.getElementById('expBtnTxt').textContent = '⏳ generating...';
   status.textContent = '';
+  progress.style.display = 'block';
+
+  const setProgress = (pct, text) => {
+    bar.style.width = pct + '%';
+    lbl.textContent = text;
+  };
+
+  setProgress(10, 'collecting posts...');
+  await new Promise(r => setTimeout(r, 80));
 
   const users = exportTarget === 'both' ? [ME, FRIEND()] : exportTarget === 'me' ? [ME] : [FRIEND()];
   let allEntries = [];
@@ -592,13 +606,17 @@ window.generatePDF = async function() {
   });
   allEntries.sort((a,b) => a.p.ts - b.p.ts);
 
-  // build HTML string for print
-  const themeColors = { scifi:'#00ffc8', cyber:'#ff00cc', space:'#88c0ff', forge:'#ffaa00', void:'#c8c8c8', glass:'#4dc8ff' };
+  setProgress(25, 'building layout...');
+  await new Promise(r => setTimeout(r, 80));
+
+  const themeColors = { scifi:'#00ffc8', cyber:'#ff00cc', space:'#88c0ff', forge:'#ffaa00', void:'#c8c8c8', glass:'#4dc8ff', terminal:'#7b5cf0' };
   const acc1 = themeColors[settings.u1Theme] || '#00ffc8';
   const acc2 = themeColors[settings.u2Theme] || '#ff00cc';
 
   let rows = '';
-  for (const {user, p} of allEntries) {
+  const total = allEntries.length;
+  for (let i = 0; i < total; i++) {
+    const {user, p} = allEntries[i];
     const acc = user === ME ? acc1 : acc2;
     const rxnHtml = inclRxn && p.reactions
       ? Object.entries(p.reactions).filter(([k])=>!k.includes('_')).map(([e,c])=>`<span style="margin-right:6px">${e} ${c}</span>`).join('')
@@ -617,7 +635,13 @@ window.generatePDF = async function() {
         ${rxnHtml ? `<div style="margin-top:8px;font-size:12px;color:#ffffff66">${rxnHtml}</div>` : ''}
         ${imgHtml}
       </div>`;
+    const pct = 25 + Math.round((i / total) * 55);
+    setProgress(pct, `processing ${i+1} of ${total} posts...`);
+    if (i % 5 === 0) await new Promise(r => setTimeout(r, 10));
   }
+
+  setProgress(85, 'rendering document...');
+  await new Promise(r => setTimeout(r, 100));
 
   const html = `<!DOCTYPE html><html><head><meta charset="UTF-8">
   <title>${settings.appName} — Progress Journal</title>
@@ -633,16 +657,46 @@ window.generatePDF = async function() {
   ${rows}
   </body></html>`;
 
+  setProgress(95, 'opening print dialog...');
+  await new Promise(r => setTimeout(r, 150));
+
   const w = window.open('', '_blank');
   w.document.write(html);
   w.document.close();
   setTimeout(() => { w.print(); }, 600);
 
+  setProgress(100, 'done ✓');
+  await new Promise(r => setTimeout(r, 800));
+
   btn.disabled = false;
   document.getElementById('expBtnTxt').textContent = '⬇ generate pdf';
+  progress.style.display = 'none';
   status.textContent = `✓ ${allEntries.length} posts exported — use "save as pdf" in print dialog`;
 };
 
+// ── TERMINAL WAVEFORM ──
+function drawWave() {
+  const canvas = document.getElementById('waveCanvas');
+  if (!canvas) return;
+  const container = document.getElementById('termWave');
+  canvas.width = container.offsetWidth || window.innerWidth;
+  canvas.height = container.offsetHeight || 28;
+  const ctx2 = canvas.getContext('2d');
+  ctx2.clearRect(0,0,canvas.width,canvas.height);
+  ctx2.strokeStyle = 'rgba(123,92,240,0.65)';
+  ctx2.lineWidth = 1;
+  ctx2.beginPath();
+  const t = Date.now() / 800;
+  for (let x = 0; x < canvas.width; x++) {
+    const y = canvas.height/2 + Math.sin(x*0.03+t)*4 + Math.sin(x*0.07+t*1.3)*2.5 + Math.sin(x*0.015+t*0.7)*3.5;
+    x === 0 ? ctx2.moveTo(x,y) : ctx2.lineTo(x,y);
+  }
+  ctx2.stroke();
+  ctx2.fillStyle = 'rgba(123,92,240,0.35)';
+  for (let i = 0; i < 14; i++) ctx2.fillRect(Math.random()*canvas.width, Math.random()*canvas.height, 1, 1);
+  requestAnimationFrame(drawWave);
+}
+drawWave();
 
 window.checkEgg = function(val) {
   if (val.replace(/\D/g,'').includes('6767676767')) {
@@ -928,6 +982,83 @@ body.u2-forge{--u2-acc:#ffaa00;--u2-acc2:rgba(255,170,0,0.08);--u2-accl:rgba(255
 body.u2-void{--u2-acc:#c8c8c8;--u2-acc2:rgba(200,200,200,0.06);--u2-accl:rgba(200,200,200,0.15);--u2-brd:rgba(200,200,200,0.1);--u2-brd2:rgba(200,200,200,0.22);--u2-glow:0 0 14px rgba(200,200,200,0.15);--u2-bg:#070707;--u2-bg2:#101010}
 body.u2-glass{--u2-acc:#c77dff;--u2-acc2:rgba(199,125,255,0.12);--u2-accl:rgba(199,125,255,0.25);--u2-brd:rgba(255,255,255,0.14);--u2-brd2:rgba(255,255,255,0.26);--u2-glow:0 0 24px rgba(199,125,255,0.35),0 0 60px rgba(199,125,255,0.12);--u2-bg:rgba(30,10,60,0.3);--u2-bg2:rgba(40,15,80,0.35)}
 body.u1-glass,body.u2-glass{background:#07091a!important}
+
+/* ── GLASS FIX — proper frosted glass ── */
+body.u1-glass{--u1-acc:#4dc8ff;--u1-acc2:rgba(77,200,255,0.1);--u1-accl:rgba(77,200,255,0.22);--u1-brd:rgba(255,255,255,0.18);--u1-brd2:rgba(255,255,255,0.32);--u1-glow:0 0 24px rgba(77,200,255,0.4),0 0 70px rgba(77,200,255,0.12);--u1-bg:rgba(255,255,255,0.06);--u1-bg2:rgba(255,255,255,0.09)}
+body.u2-glass{--u2-acc:#c77dff;--u2-acc2:rgba(199,125,255,0.1);--u2-accl:rgba(199,125,255,0.22);--u2-brd:rgba(255,255,255,0.18);--u2-brd2:rgba(255,255,255,0.32);--u2-glow:0 0 24px rgba(199,125,255,0.4),0 0 70px rgba(199,125,255,0.12);--u2-bg:rgba(255,255,255,0.06);--u2-bg2:rgba(255,255,255,0.09)}
+body.u1-glass .col-u1,body.u1-glass .pcard{backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px)}
+body.u2-glass .col-u2,body.u2-glass .pcard{backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px)}
+body.u1-glass .col-u1{background:linear-gradient(135deg,rgba(77,200,255,0.08) 0%,rgba(255,255,255,0.04) 100%)!important}
+body.u2-glass .col-u2{background:linear-gradient(135deg,rgba(199,125,255,0.08) 0%,rgba(255,255,255,0.04) 100%)!important}
+body.u1-glass .pcard,body.u2-glass .pcard{background:rgba(255,255,255,0.07)!important;border-color:rgba(255,255,255,0.15)!important}
+
+/* ── TERMINAL THEME ── */
+body.u1-terminal{--u1-acc:#7b5cf0;--u1-acc2:rgba(123,92,240,0.12);--u1-accl:rgba(123,92,240,0.28);--u1-brd:rgba(123,92,240,0.25);--u1-brd2:rgba(123,92,240,0.45);--u1-glow:0 0 12px rgba(123,92,240,0.5),0 0 40px rgba(123,92,240,0.15);--u1-bg:#000000;--u1-bg2:#080610}
+body.u2-terminal{--u2-acc:#7b5cf0;--u2-acc2:rgba(123,92,240,0.12);--u2-accl:rgba(123,92,240,0.28);--u2-brd:rgba(123,92,240,0.25);--u2-brd2:rgba(123,92,240,0.45);--u2-glow:0 0 12px rgba(123,92,240,0.5),0 0 40px rgba(123,92,240,0.15);--u2-bg:#000000;--u2-bg2:#080610}
+
+/* terminal forces black background + pixel font + scanlines */
+body.u1-terminal,body.u2-terminal{background:#000!important}
+body.u1-terminal *,body.u2-terminal *{font-family:'Courier New',Courier,monospace!important;letter-spacing:0.05em}
+
+/* CRT scanline overlay — only when terminal active */
+body.u1-terminal::after,body.u2-terminal::after{
+  content:'';pointer-events:none;position:fixed;inset:0;z-index:9999;
+  background:repeating-linear-gradient(0deg,transparent,transparent 2px,rgba(0,0,0,0.18) 2px,rgba(0,0,0,0.18) 4px);
+  animation:scanroll 8s linear infinite;
+}
+@keyframes scanroll{from{background-position:0 0}to{background-position:0 100px}}
+
+/* terminal pixel border style */
+body.u1-terminal .pcard,body.u2-terminal .pcard{border-style:solid!important;border-radius:0!important;image-rendering:pixelated}
+body.u1-terminal .col,body.u2-terminal .col{border-right:1px dashed rgba(123,92,240,0.3)!important}
+body.u1-terminal .hdr,body.u2-terminal .hdr{border-bottom:1px dashed rgba(123,92,240,0.4)!important}
+
+/* terminal post card data-panel rows style */
+body.u1-terminal .ptxt,body.u2-terminal .ptxt{
+  font-size:11px!important;line-height:1.9!important;color:rgba(180,160,255,0.9)!important;
+}
+body.u1-terminal .phead,body.u2-terminal .phead{
+  border-bottom:1px dashed rgba(123,92,240,0.3)!important;
+  padding:6px 10px!important;
+}
+body.u1-terminal .pday,body.u2-terminal .pday{
+  color:#7b5cf0!important;text-shadow:0 0 8px rgba(123,92,240,0.8)!important;
+  font-size:9px!important;letter-spacing:0.2em!important;
+}
+/* terminal images get CRT dither effect via CSS filter */
+body.u1-terminal .pimg-wrap img,body.u2-terminal .pimg-wrap img{
+  filter:contrast(1.2) brightness(0.85) saturate(0) sepia(0.4) hue-rotate(220deg)!important;
+  image-rendering:pixelated;
+}
+/* terminal col header data-panel style */
+body.u1-terminal .col-header,body.u2-terminal .col-header{
+  border-bottom:1px dashed rgba(123,92,240,0.4)!important;
+  background:#000!important;
+}
+body.u1-terminal .col-name,body.u2-terminal .col-name{
+  text-shadow:0 0 10px rgba(123,92,240,0.9)!important;
+  font-size:10px!important;letter-spacing:0.18em!important;
+}
+/* terminal hdr logo */
+body.u1-terminal .hdr-logo,body.u2-terminal .hdr-logo{
+  color:#7b5cf0!important;text-shadow:0 0 16px rgba(123,92,240,0.9),0 0 30px rgba(123,92,240,0.4)!important;
+  font-size:16px!important;letter-spacing:0.35em!important;
+}
+/* terminal login screen */
+body.u1-terminal .login-box,body.u2-terminal .login-box,
+body.terminal-pre .login-box{
+  background:#000!important;border:1px solid #7b5cf0!important;
+  box-shadow:0 0 30px rgba(123,92,240,0.4),inset 0 0 30px rgba(0,0,0,0.8)!important;
+  border-radius:0!important;
+}
+/* terminal ntabs */
+body.u1-terminal .ntabs,body.u2-terminal .ntabs{background:#000!important;border-bottom:1px dashed rgba(123,92,240,0.3)!important}
+body.u1-terminal .ntab.on,body.u2-terminal .ntab.on{color:#7b5cf0!important;border-bottom-color:#7b5cf0!important;text-shadow:0 0 10px rgba(123,92,240,0.8)!important}
+
+/* ── WAVEFORM BAR — terminal decoration ── */
+.term-wave{display:none;height:28px;width:100%;overflow:hidden;background:#000;border-top:1px dashed rgba(123,92,240,0.3);flex-shrink:0}
+body.u1-terminal .term-wave,body.u2-terminal .term-wave{display:block}
+.term-wave canvas{width:100%;height:100%}
 body.u1-glass #gbg,body.u2-glass #gbg{background-image:none!important;background:radial-gradient(ellipse at 15% 15%,rgba(0,150,255,0.2) 0%,transparent 55%),radial-gradient(ellipse at 85% 75%,rgba(120,0,255,0.15) 0%,transparent 50%)!important}
 body.u1-glass .hdr,body.u2-glass .hdr,body.u1-glass .composer,body.u2-glass .composer,body.u1-glass .ntabs,body.u2-glass .ntabs{backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px)}
 body.u1-glass .col-u1 .pcard{background:rgba(15,40,90,0.3)!important;backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px)}
@@ -1092,6 +1223,9 @@ body.u1-glass .sett,body.u2-glass .sett{background:rgba(7,9,26,0.94);backdrop-fi
 .exp-btn{width:100%;margin-top:20px;padding:14px;background:rgba(0,255,200,0.08);border:1px solid rgba(0,255,200,0.3);color:var(--u1-acc);font-family:'Orbitron',monospace;font-size:12px;font-weight:700;letter-spacing:0.15em;cursor:pointer;border-radius:3px;transition:all 0.2s;text-shadow:0 0 10px var(--u1-acc)}
 .exp-btn:hover{background:rgba(0,255,200,0.15);box-shadow:0 0 20px rgba(0,255,200,0.15)}
 .exp-btn:disabled{opacity:0.4;cursor:not-allowed}
+.exp-progress{margin-top:14px;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.1);border-radius:2px;overflow:hidden;position:relative;height:28px}
+.exp-progress-bar{height:100%;background:linear-gradient(90deg,var(--u1-acc2),var(--u1-accl));border-right:2px solid var(--u1-acc);width:0%;transition:width 0.3s ease;box-shadow:0 0 12px var(--u1-acc)}
+.exp-progress-lbl{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-family:'Space Mono',monospace;font-size:9px;color:rgba(255,255,255,0.7);letter-spacing:0.12em}
 
 /* ── COMPOSER ── */
 .composer{border-top:1px solid rgba(255,255,255,0.07);padding:12px 20px;background:rgba(3,5,8,0.95);position:sticky;bottom:0;z-index:10}
@@ -1463,9 +1597,15 @@ body.u1-glass .sett,body.u2-glass .sett{background:rgba(7,9,26,0.94);backdrop-fi
       <button class="exp-btn" id="expBtn" onclick="generatePDF()">
         <span id="expBtnTxt">⬇ generate pdf</span>
       </button>
+      <div class="exp-progress" id="expProgress" style="display:none">
+        <div class="exp-progress-bar" id="expProgressBar"></div>
+        <div class="exp-progress-lbl" id="expProgressLbl">preparing...</div>
+      </div>
       <div class="search-meta" style="margin-top:10px;text-align:center" id="expStatus"></div>
     </div>
   </div>
+  <!-- TERMINAL WAVEFORM BAR -->
+  <div class="term-wave" id="termWave"><canvas id="waveCanvas"></canvas></div>
 
 </div>
 </div>
