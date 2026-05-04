@@ -438,20 +438,16 @@ window.makePost = async function() {
 
 // ── TABS ──
 window.goTab = function(tab) {
-  ['feed','timeline','heatmap'].forEach(t => {
+  ['feed','timeline','heatmap','search','export'].forEach(t => {
     const v = document.getElementById(t + 'View');
     if (v) v.style.display = 'none';
     const tb = document.getElementById('tb-' + t);
     if (tb) tb.classList.remove('on');
-    const nt = document.getElementById('nt-' + t);
-    if (nt) nt.classList.remove('on');
   });
   const view = document.getElementById(tab + 'View');
   if (view) view.style.display = tab === 'feed' ? 'flex' : 'block';
   const tb = document.getElementById('tb-' + tab);
   if (tb) tb.classList.add('on');
-  const nt = document.getElementById('nt-' + tab);
-  if (nt) nt.classList.add('on');
   if (tab === 'timeline') renderTimeline();
   if (tab === 'heatmap') {
     buildHmapControls(ME);
@@ -459,6 +455,8 @@ window.goTab = function(tab) {
     buildHmap(ME, hmapRange[ME]);
     buildHmap(FRIEND(), hmapRange[FRIEND()]);
   }
+  if (tab === 'search') { doSearch(document.getElementById('searchInp').value); }
+  if (tab === 'export') { updateExportCounts(); }
 };
 
 // ── SETTINGS ──
@@ -511,7 +509,141 @@ function buildTGrid(col, elId, sel) {
   });
 }
 
-// ── EASTER EGG ──
+// ── SEARCH ──
+let searchFilter = 'both';
+window.setSearchFilter = function(f) {
+  searchFilter = f;
+  ['both','me','friend'].forEach(x => document.getElementById('sf-'+x).classList.toggle('on', x===f));
+  doSearch(document.getElementById('searchInp').value);
+};
+
+window.doSearch = function(query) {
+  const q = query.trim().toLowerCase();
+  const res = document.getElementById('searchResults');
+  const meta = document.getElementById('searchMeta');
+  if (!q) { res.innerHTML = ''; meta.textContent = 'type to search through all posts'; return; }
+
+  const users = searchFilter === 'both' ? [ME, FRIEND()] : searchFilter === 'me' ? [ME] : [FRIEND()];
+  let matches = [];
+  users.forEach(user => {
+    Object.entries(allPosts[user] || {}).forEach(([key, p]) => {
+      if (p.text && p.text.toLowerCase().includes(q)) matches.push({user, key, p});
+    });
+  });
+  matches.sort((a,b) => b.p.ts - a.p.ts);
+
+  meta.textContent = `${matches.length} result${matches.length !== 1 ? 's' : ''} for "${query}"`;
+  if (!matches.length) { res.innerHTML = `<div class="col-empty">no posts found matching "${query}"</div>`; return; }
+
+  res.innerHTML = '';
+  matches.forEach(({user, p}) => {
+    const isMe = user === ME;
+    const highlighted = p.text.replace(new RegExp(`(${q.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')})`, 'gi'), '<mark>$1</mark>');
+    const card = document.createElement('div');
+    card.className = 'sres-card';
+    card.innerHTML = `
+      <div class="sres-head">
+        <span class="sres-user ${isMe?'sres-u1':'sres-u2'}">${user}</span>
+        <span class="sres-day">day ${p.day}</span>
+        <span class="sres-date">${p.date} · ${p.time}</span>
+      </div>
+      <div class="sres-txt">${highlighted}</div>
+      ${p.img ? `<img class="sres-img" src="${p.img}" loading="lazy">` : ''}
+    `;
+    res.appendChild(card);
+  });
+};
+
+// ── EXPORT PDF ──
+let exportTarget = 'me';
+window.selectExport = function(t) {
+  exportTarget = t;
+  ['me','friend','both'].forEach((x,i) => {
+    const c = document.querySelectorAll('.exp-card')[i];
+    const r = document.getElementById('expR'+(i+1));
+    c.classList.toggle('sel', x===t);
+  });
+};
+
+window.updateExportCounts = function() {
+  const myPosts = Object.values(allPosts[ME]||{});
+  const frPosts = Object.values(allPosts[FRIEND()]||{});
+  const e1 = document.getElementById('expName1'); if(e1) e1.textContent = ME + "'s posts";
+  const e2 = document.getElementById('expName2'); if(e2) e2.textContent = FRIEND() + "'s posts";
+  const s1 = document.getElementById('expSub1'); if(s1) s1.textContent = myPosts.length + ' posts';
+  const s2 = document.getElementById('expSub2'); if(s2) s2.textContent = frPosts.length + ' posts';
+  // default select me
+  selectExport('me');
+};
+
+window.generatePDF = async function() {
+  const btn = document.getElementById('expBtn');
+  const status = document.getElementById('expStatus');
+  const inclImg = document.getElementById('tog-expimg').classList.contains('on');
+  const inclRxn = document.getElementById('tog-exprxn').classList.contains('on');
+  btn.disabled = true;
+  document.getElementById('expBtnTxt').textContent = '⏳ generating...';
+  status.textContent = '';
+
+  const users = exportTarget === 'both' ? [ME, FRIEND()] : exportTarget === 'me' ? [ME] : [FRIEND()];
+  let allEntries = [];
+  users.forEach(user => {
+    Object.entries(allPosts[user]||{}).forEach(([k,p]) => allEntries.push({user,p}));
+  });
+  allEntries.sort((a,b) => a.p.ts - b.p.ts);
+
+  // build HTML string for print
+  const themeColors = { scifi:'#00ffc8', cyber:'#ff00cc', space:'#88c0ff', forge:'#ffaa00', void:'#c8c8c8', glass:'#4dc8ff' };
+  const acc1 = themeColors[settings.u1Theme] || '#00ffc8';
+  const acc2 = themeColors[settings.u2Theme] || '#ff00cc';
+
+  let rows = '';
+  for (const {user, p} of allEntries) {
+    const acc = user === ME ? acc1 : acc2;
+    const rxnHtml = inclRxn && p.reactions
+      ? Object.entries(p.reactions).filter(([k])=>!k.includes('_')).map(([e,c])=>`<span style="margin-right:6px">${e} ${c}</span>`).join('')
+      : '';
+    const imgHtml = inclImg && p.img
+      ? `<img src="${p.img}" style="width:100%;max-height:220px;object-fit:contain;background:#000;border-radius:4px;margin-top:10px;display:block">`
+      : '';
+    rows += `
+      <div style="border:1px solid ${acc}33;border-radius:6px;padding:16px;margin-bottom:14px;background:#07090f;break-inside:avoid">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
+          <span style="font-family:monospace;font-size:11px;font-weight:700;color:${acc};background:${acc}18;border:1px solid ${acc}44;padding:2px 8px;border-radius:2px">${user}</span>
+          <span style="font-family:monospace;font-size:11px;color:${acc};font-weight:700">DAY ${p.day}</span>
+          <span style="font-family:monospace;font-size:9px;color:#ffffff55;margin-left:auto">${p.date} · ${p.time}</span>
+        </div>
+        <div style="font-size:13px;line-height:1.7;color:#ddd">${p.text}</div>
+        ${rxnHtml ? `<div style="margin-top:8px;font-size:12px;color:#ffffff66">${rxnHtml}</div>` : ''}
+        ${imgHtml}
+      </div>`;
+  }
+
+  const html = `<!DOCTYPE html><html><head><meta charset="UTF-8">
+  <title>${settings.appName} — Progress Journal</title>
+  <style>
+    *{box-sizing:border-box;margin:0;padding:0}
+    body{background:#030508;color:#e0f5ef;font-family:monospace;padding:30px;max-width:800px;margin:0 auto}
+    h1{font-size:28px;color:${acc1};letter-spacing:0.2em;margin-bottom:4px}
+    .sub{font-size:11px;color:#ffffff44;letter-spacing:0.1em;margin-bottom:30px}
+    @media print{body{background:#030508!important;-webkit-print-color-adjust:exact;print-color-adjust:exact}}
+  </style></head><body>
+  <h1>${settings.appName}</h1>
+  <div class="sub">progress journal · ${allEntries.length} entries · generated ${new Date().toLocaleDateString([],{day:'numeric',month:'long',year:'numeric'})}</div>
+  ${rows}
+  </body></html>`;
+
+  const w = window.open('', '_blank');
+  w.document.write(html);
+  w.document.close();
+  setTimeout(() => { w.print(); }, 600);
+
+  btn.disabled = false;
+  document.getElementById('expBtnTxt').textContent = '⬇ generate pdf';
+  status.textContent = `✓ ${allEntries.length} posts exported — use "save as pdf" in print dialog`;
+};
+
+
 window.checkEgg = function(val) {
   if (val.replace(/\D/g,'').includes('6767676767')) {
     document.getElementById('easterEgg').classList.add('show');
@@ -925,6 +1057,42 @@ body.u1-glass .sett,body.u2-glass .sett{background:rgba(7,9,26,0.94);backdrop-fi
 .edit-textarea{width:100%;min-height:100px;margin-top:12px;resize:vertical;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.1);padding:10px 12px;color:#e0f5ef;font-family:'Space Mono',monospace;font-size:12px;outline:none;border-radius:2px;line-height:1.6}
 .edit-textarea:focus{border-color:rgba(0,255,200,0.3);box-shadow:0 0 8px rgba(0,255,200,0.08)}
 
+/* ── SEARCH ── */
+.search-wrap{max-width:900px;margin:0 auto}
+.search-bar-row{display:flex;gap:10px;align-items:center;margin-bottom:10px;flex-wrap:wrap}
+.search-inp{flex:1;min-width:200px;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.12);padding:10px 16px;color:#e0f5ef;font-family:'Space Mono',monospace;font-size:12px;outline:none;border-radius:3px;transition:border-color 0.2s}
+.search-inp:focus{border-color:rgba(0,255,200,0.35);box-shadow:0 0 12px rgba(0,255,200,0.06)}
+.search-filters{display:flex;gap:5px}
+.search-meta{font-family:'Space Mono',monospace;font-size:9px;color:rgba(255,255,255,0.35);letter-spacing:0.08em;margin-bottom:14px}
+.search-results{display:flex;flex-direction:column;gap:10px}
+.sres-card{background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.08);border-radius:4px;padding:12px 14px;transition:border-color 0.2s;cursor:default}
+.sres-card:hover{border-color:rgba(255,255,255,0.18)}
+.sres-head{display:flex;align-items:center;gap:8px;margin-bottom:6px}
+.sres-user{font-family:'Orbitron',monospace;font-size:9px;font-weight:700;padding:2px 7px;border-radius:2px}
+.sres-u1{color:var(--u1-acc);background:var(--u1-acc2);border:1px solid var(--u1-brd2)}
+.sres-u2{color:var(--u2-acc);background:var(--u2-acc2);border:1px solid var(--u2-brd2)}
+.sres-day{font-family:'Orbitron',monospace;font-size:9px;color:rgba(255,255,255,0.5)}
+.sres-date{font-family:'Space Mono',monospace;font-size:8px;color:rgba(255,255,255,0.3);margin-left:auto}
+.sres-txt{font-size:13px;line-height:1.6;color:rgba(255,255,255,0.85)}
+.sres-txt mark{background:rgba(0,255,200,0.2);color:#00ffc8;border-radius:2px;padding:0 2px}
+.sres-img{width:100%;max-height:120px;object-fit:contain;background:#000;border-radius:2px;margin-top:8px;display:block}
+
+/* ── EXPORT ── */
+.export-wrap{max-width:600px;margin:0 auto}
+.export-header{margin-bottom:20px}
+.export-options{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+.exp-card{background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.1);border-radius:4px;padding:14px;cursor:pointer;transition:all 0.2s;position:relative}
+.exp-card:hover{border-color:rgba(0,255,200,0.3);background:rgba(0,255,200,0.04)}
+.exp-card.sel{border-color:var(--u1-acc);background:var(--u1-acc2);box-shadow:var(--u1-glow)}
+.exp-card-name{font-family:'Orbitron',monospace;font-size:10px;font-weight:700;color:#fff;margin-bottom:4px}
+.exp-card-sub{font-family:'Space Mono',monospace;font-size:8px;color:rgba(255,255,255,0.4)}
+.exp-radio{width:8px;height:8px;border-radius:50%;border:1px solid rgba(255,255,255,0.3);position:absolute;top:12px;right:12px;transition:all 0.2s}
+.exp-card.sel .exp-radio{background:var(--u1-acc);border-color:var(--u1-acc);box-shadow:var(--u1-glow)}
+.exp-opt{display:flex;align-items:center;justify-content:space-between;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.08);border-radius:4px;padding:12px 14px}
+.exp-btn{width:100%;margin-top:20px;padding:14px;background:rgba(0,255,200,0.08);border:1px solid rgba(0,255,200,0.3);color:var(--u1-acc);font-family:'Orbitron',monospace;font-size:12px;font-weight:700;letter-spacing:0.15em;cursor:pointer;border-radius:3px;transition:all 0.2s;text-shadow:0 0 10px var(--u1-acc)}
+.exp-btn:hover{background:rgba(0,255,200,0.15);box-shadow:0 0 20px rgba(0,255,200,0.15)}
+.exp-btn:disabled{opacity:0.4;cursor:not-allowed}
+
 /* ── COMPOSER ── */
 .composer{border-top:1px solid rgba(255,255,255,0.07);padding:12px 20px;background:rgba(3,5,8,0.95);position:sticky;bottom:0;z-index:10}
 .comp-inner{display:grid;grid-template-columns:1fr 1fr;gap:14px}
@@ -1123,6 +1291,8 @@ body.u1-glass .sett,body.u2-glass .sett{background:rgba(7,9,26,0.94);backdrop-fi
       <button class="hbtn on" id="tb-feed" onclick="goTab('feed')">feed</button>
       <button class="hbtn" id="tb-timeline" onclick="goTab('timeline')">timeline</button>
       <button class="hbtn" id="tb-heatmap" onclick="goTab('heatmap')">heatmap</button>
+      <button class="hbtn" id="tb-search" onclick="goTab('search')">search</button>
+      <button class="hbtn" id="tb-export" onclick="goTab('export')">export</button>
       <button class="hbtn" onclick="togSett()">config ⚙</button>
       <button class="hbtn danger" id="logoutBtn" onclick="logout()">logout</button>
     </div>
@@ -1240,7 +1410,63 @@ body.u1-glass .sett,body.u2-glass .sett{background:rgba(7,9,26,0.94);backdrop-fi
     </div>
   </div>
 
+  <!-- SEARCH -->
+  <div id="searchView" style="display:none;overflow-y:auto;flex:1;padding:20px">
+    <div class="search-wrap">
+      <div class="search-bar-row">
+        <input class="search-inp" id="searchInp" placeholder="search posts by keyword..." oninput="doSearch(this.value)" autocomplete="off">
+        <div class="search-filters">
+          <button class="hrange on" id="sf-both" onclick="setSearchFilter('both')">both</button>
+          <button class="hrange" id="sf-me" onclick="setSearchFilter('me')">mine</button>
+          <button class="hrange" id="sf-friend" onclick="setSearchFilter('friend')">friend</button>
+        </div>
+      </div>
+      <div class="search-meta" id="searchMeta">type to search through all posts</div>
+      <div class="search-results" id="searchResults"></div>
+    </div>
+  </div>
+
+  <!-- EXPORT -->
+  <div id="exportView" style="display:none;overflow-y:auto;flex:1;padding:20px">
+    <div class="export-wrap">
+      <div class="export-header">
+        <div class="hmap-title">export journal</div>
+        <div class="search-meta">generate a pdf of your complete progress journey</div>
+      </div>
+      <div class="export-options">
+        <div class="exp-card" onclick="selectExport('me')">
+          <div class="exp-card-name" id="expName1">my posts</div>
+          <div class="exp-card-sub" id="expSub1">0 posts</div>
+          <div class="exp-radio" id="expR1"></div>
+        </div>
+        <div class="exp-card" onclick="selectExport('friend')">
+          <div class="exp-card-name" id="expName2">friend's posts</div>
+          <div class="exp-card-sub" id="expSub2">0 posts</div>
+          <div class="exp-radio" id="expR2"></div>
+        </div>
+        <div class="exp-card" onclick="selectExport('both')">
+          <div class="exp-card-name">combined</div>
+          <div class="exp-card-sub">all posts together</div>
+          <div class="exp-radio" id="expR3"></div>
+        </div>
+      </div>
+      <div class="export-options" style="margin-top:10px">
+        <div class="exp-opt">
+          <div class="tinfo">include images<div class="tsub">embeds post images in pdf</div></div>
+          <div class="tog on" id="tog-expimg" onclick="this.classList.toggle('on')"></div>
+        </div>
+        <div class="exp-opt">
+          <div class="tinfo">include reactions<div class="tsub">shows emoji reactions on each post</div></div>
+          <div class="tog on" id="tog-exprxn" onclick="this.classList.toggle('on')"></div>
+        </div>
+      </div>
+      <button class="exp-btn" id="expBtn" onclick="generatePDF()">
+        <span id="expBtnTxt">⬇ generate pdf</span>
+      </button>
+      <div class="search-meta" style="margin-top:10px;text-align:center" id="expStatus"></div>
+    </div>
+  </div>
+
 </div>
 </div>
-</body>
 </html>
