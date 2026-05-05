@@ -81,7 +81,7 @@ let streaks = { Monish: 0, Prashanth: 0 };
 let lastPostDate = { Monish: '', Prashanth: '' };
 let hmapRange = { Monish: 30, Prashanth: 30 };
 let daysPer = { Monish: 1, Prashanth: 1 };
-let settings = { uiStyle:'default', u1Hex:'#00ffc8', u2Hex:'#ff00cc', appName:'ZENITH-FORGE', quotes:true, tgToken:'', tgChat:'', driveUrl:'' };
+let settings = { uiStyle:'default', u1Hex:'#00ffc8', u2Hex:'#ff00cc', appName:'ZENITH-FORGE', quotes:true, tgToken:'8793839990:AAEtmAlQ1-BlSyuBJ1cKmVme6Q7YLE7PCnw', tgChat:'-5191928580', driveUrl:'' };
 
 function FRIEND() { return ME === 'Monish' ? 'Prashanth' : 'Monish'; }
 
@@ -140,8 +140,7 @@ function initUI() {
   const qb = document.getElementById('qbar'); if(qb) qb.style.visibility = settings.quotes ? 'visible' : 'hidden';
   document.getElementById('tog-quotes').classList.toggle('on', settings.quotes);
   // populate saved config
-  if (settings.tgToken) document.getElementById('tgTokenInp').value = settings.tgToken;
-  if (settings.tgChat) document.getElementById('tgChatInp').value = settings.tgChat;
+  // telegram configured internally
   if (settings.driveUrl) document.getElementById('driveUrlInp').value = settings.driveUrl;
 }
 
@@ -931,7 +930,7 @@ window.checkEgg = function(val) {
 
 // ── TELEGRAM BOT ──
 window.saveTgToken = function() {
-  const v = document.getElementById('tgTokenInp').value.trim();
+  const el = document.getElementById('tgTokenInp'); const v = el ? el.value.trim() : '';
   checkEgg(v);
   if (!v) return;
   settings.tgToken = v;
@@ -939,7 +938,7 @@ window.saveTgToken = function() {
   showToast('bot token saved ✓');
 };
 window.saveTgChat = function() {
-  const v = document.getElementById('tgChatInp').value.trim();
+  const el = document.getElementById('tgChatInp'); const v = el ? el.value.trim() : '';
   if (!v) return;
   settings.tgChat = v;
   saveSettings();
@@ -974,7 +973,7 @@ async function sendTgCard(post, streakCount, poster) {
   const ctx = canvas.getContext('2d');
 
   // use stored hex directly — works regardless of who is logged in
-  const acc = (postUser === 'Monish') ? settings.u1Hex : settings.u2Hex;
+  const acc = (postUser === 'Monish') ? (settings.u1Hex || '#00ffc8') : (settings.u2Hex || '#ff00cc');
   const accRgb = hexToRgb(acc);
 
   // ── background ──
@@ -1119,7 +1118,7 @@ async function sendTgCard(post, streakCount, poster) {
     const form = new FormData();
     form.append('chat_id', settings.tgChat);
     form.append('photo', blob, 'epoch_card.jpg');
-    form.append('caption', `${ME} — Day ${post.day} · Streak ${streakCount}`);
+    form.append('caption', `${postUser} — Day ${post.day} · Streak ${streakCount}`);
     try {
       await fetch(`https://api.telegram.org/bot${settings.tgToken}/sendPhoto`, {
         method: 'POST', body: form
@@ -1318,7 +1317,7 @@ window.sendInlineComment = async function(postKey, postUser) {
   inp.value = '';
 };
 
-// paste handler — catches Win+G screenshots pasted into comment inputs
+// paste handler — catches Win+G screenshots AND gif/image URLs pasted into comment inputs
 document.addEventListener('paste', async (e) => {
   const active = document.activeElement;
   if (!active || !active.classList.contains('icmt-inp')) return;
@@ -2128,12 +2127,10 @@ body.ui-glass .taskbar,body.u1-glass .taskbar,body.u2-glass .taskbar{background:
       <div class="ssec">
         <div class="slbl">telegram bot</div>
         <div class="srow">
-          <input class="sinp" id="tgTokenInp" placeholder="bot token from @BotFather" style="margin:0;flex:1">
-          <button class="sbtn" onclick="saveTgToken()">save</button>
+          <div class="sinp" style="margin:0;flex:1;opacity:0.5;font-size:9px;display:flex;align-items:center">✓ token configured internally</div>
         </div>
         <div class="srow" style="margin-top:8px">
-          <input class="sinp" id="tgChatInp" placeholder="group chat id (e.g. -1001234567)" style="margin:0;flex:1">
-          <button class="sbtn" onclick="saveTgChat()">save</button>
+          <div class="sinp" style="margin:0;flex:1;opacity:0.5;font-size:9px;display:flex;align-items:center">✓ chat id configured internally</div>
         </div>
         <div class="sinp-hint">messages go directly to your telegram group on every post</div>
         <button class="sbtn" style="margin-top:10px;width:100%" onclick="testTg()">send test message</button>
