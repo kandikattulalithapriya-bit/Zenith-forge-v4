@@ -74,7 +74,7 @@ const UI_STYLES = [
 // Color wheels — free pick via HSL
 let wheelState = { u1: '#00ffc8', u2: '#ff00cc' };
 
-const APP_VERSION = 'v21';
+const APP_VERSION = 'v24';
 let imgData = null;
 let allPosts = { Monish: {}, Prashanth: {} };
 let streaks = { Monish: 0, Prashanth: 0 };
@@ -244,8 +244,9 @@ function mkCard(p, key, user) {
     <div class="inline-cmt" id="icmt-${user}-${key}" style="display:none">
       <div class="icmt-list" id="icmtlist-${user}-${key}"></div>
       <div class="icmt-input-row">
-        <input class="icmt-inp" id="icmtinp-${user}-${key}" placeholder="comment... (win+g → snip → paste)" maxlength="400"
+        <input class="icmt-inp" id="icmtinp-${user}-${key}" placeholder="comment... (ctrl+v to paste screenshot)" maxlength="400"
           onkeydown="if(event.key==='Enter')sendInlineComment('${key}','${user}')">
+        <button class="icmt-gif-btn" onclick="openGiphyPicker('${key}','${user}')" title="search GIFs">GIF</button>
         <button class="icmt-send" onclick="sendInlineComment('${key}','${user}')">↵</button>
       </div>
     </div>`;
@@ -1118,7 +1119,8 @@ async function sendTgCard(post, streakCount, poster) {
     const form = new FormData();
     form.append('chat_id', settings.tgChat);
     form.append('photo', blob, 'epoch_card.jpg');
-    form.append('caption', `${postUser} — Day ${post.day} · Streak ${streakCount}`);
+    const tgEmoji = (postUser === 'Monish') ? '🟢' : '🟣';
+    form.append('caption', `${tgEmoji} ${postUser} — Day ${post.day}\n🔥 Streak: ${streakCount} days\n📅 ${post.date}`);
     try {
       await fetch(`https://api.telegram.org/bot${settings.tgToken}/sendPhoto`, {
         method: 'POST', body: form
@@ -1317,7 +1319,64 @@ window.sendInlineComment = async function(postKey, postUser) {
   inp.value = '';
 };
 
-// paste handler — catches Win+G screenshots AND gif/image URLs pasted into comment inputs
+// ── GIPHY SETTINGS ──
+const GIPHY_KEY = 'PASTE_YOUR_GIPHY_KEY_HERE'; // get free key at developers.giphy.com
+let giphyTarget = null; // {postKey, postUser} for which comment box the picker is for
+
+window.openGiphyPicker = function(postKey, postUser) {
+  giphyTarget = { postKey, postUser };
+  const picker = document.getElementById('giphyPicker');
+  picker.style.display = picker.style.display === 'flex' ? 'none' : 'flex';
+  document.getElementById('giphySearch').value = '';
+  document.getElementById('giphyGrid').innerHTML = '';
+  document.getElementById('giphySearch').focus();
+};
+
+window.closeGiphyPicker = function() {
+  const picker = document.getElementById('giphyPicker');
+  picker.style.display = 'none';
+  giphyTarget = null;
+};
+
+window.searchGiphy = async function() {
+  const q = document.getElementById('giphySearch').value.trim();
+  if (!q || GIPHY_KEY === 'PASTE_YOUR_GIPHY_KEY_HERE') {
+    showToast('add giphy api key in code first'); return;
+  }
+  const grid = document.getElementById('giphyGrid');
+  grid.innerHTML = '<div class="giphy-loading">searching...</div>';
+  try {
+    const res = await fetch(`https://api.giphy.com/v1/gifs/search?api_key=${GIPHY_KEY}&q=${encodeURIComponent(q)}&limit=18&rating=g`);
+    const json = await res.json();
+    grid.innerHTML = '';
+    json.data.forEach(gif => {
+      const url = gif.images.fixed_height_small.url;
+      const original = gif.images.original.url;
+      const img = document.createElement('img');
+      img.src = url;
+      img.className = 'giphy-thumb';
+      img.title = gif.title;
+      img.onclick = async () => {
+        if (!giphyTarget) return;
+        const now = new Date();
+        await push(ref(db, `comments/${giphyTarget.postUser}/${giphyTarget.postKey}`), {
+          author: ME,
+          text: original,   // store original GIF url — renders inline
+          ts: Date.now(),
+          time: now.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})
+        });
+        closeGiphyPicker();
+        showToast('gif sent ✓');
+      };
+      grid.appendChild(img);
+    });
+    if (!json.data.length) grid.innerHTML = '<div class="giphy-loading">no results</div>';
+  } catch(e) {
+    grid.innerHTML = '<div class="giphy-loading">error — check api key</div>';
+  }
+};
+
+// paste handler — catches Win+G / Win+. screenshots and GIF blobs
 document.addEventListener('paste', async (e) => {
   const active = document.activeElement;
   if (!active || !active.classList.contains('icmt-inp')) return;
@@ -1330,8 +1389,7 @@ document.addEventListener('paste', async (e) => {
       const reader = new FileReader();
       reader.onload = async (ev) => {
         const dataUrl = ev.target.result;
-        // find which post this input belongs to
-        const id = active.id; // icmtinp-{user}-{key}
+        const id = active.id;
         const parts = id.replace('icmtinp-','').split('-');
         const postUser = parts[0];
         const postKey = parts.slice(1).join('-');
@@ -1342,11 +1400,26 @@ document.addEventListener('paste', async (e) => {
           ts: Date.now(),
           time: now.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})
         });
-        showToast('screenshot sent ✓');
+        showToast('image sent ✓');
       };
       reader.readAsDataURL(blob);
       break;
     }
+  }
+  // handle pasted text that is an image/gif URL
+  const txt = e.clipboardData.getData('text/plain').trim();
+  if (txt && /^https?:\/\/.+\.(gif|png|jpg|jpeg|webp)(\?.*)?$/i.test(txt)) {
+    e.preventDefault();
+    const id = active.id;
+    const parts = id.replace('icmtinp-','').split('-');
+    const postUser = parts[0];
+    const postKey = parts.slice(1).join('-');
+    const now = new Date();
+    await push(ref(db, `comments/${postUser}/${postKey}`), {
+      author: ME, text: txt, ts: Date.now(),
+      time: now.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})
+    });
+    showToast('gif sent ✓');
   }
 });
 
@@ -1765,7 +1838,12 @@ body.ui-glass .taskbar,body.u1-glass .taskbar,body.u2-glass .taskbar{background:
 .icmt-time{font-family:'Space Mono',monospace;font-size:7px;color:rgba(255,255,255,0.25);margin-left:auto}
 .icmt-del{background:none;border:none;color:rgba(255,80,80,0.35);cursor:pointer;font-size:9px;padding:0 3px;flex-shrink:0}
 .icmt-del:hover{color:rgba(255,80,80,0.8)}
-.icmt-pasted-img{max-width:100%;max-height:140px;border-radius:4px;object-fit:contain;background:#000;margin-top:3px;display:block}
+.icmt-gif-btn{background:rgba(0,255,200,0.08);border:1px solid rgba(0,255,200,0.2);color:rgba(0,255,200,0.7);font-family:'Orbitron',monospace;font-size:7px;font-weight:700;padding:5px 7px;border-radius:2px;cursor:pointer;flex-shrink:0;letter-spacing:0.05em;transition:all 0.15s}
+.icmt-gif-btn:hover{background:rgba(0,255,200,0.15);color:#00ffc8}
+.giphy-thumb{width:100%;aspect-ratio:1;object-fit:cover;border-radius:3px;cursor:pointer;border:1px solid rgba(255,255,255,0.06);transition:all 0.15s}
+.giphy-thumb:hover{border-color:rgba(0,255,200,0.4);transform:scale(1.03)}
+.giphy-loading{grid-column:1/-1;font-family:'Space Mono',monospace;font-size:9px;color:rgba(255,255,255,0.3);text-align:center;padding:20px}
+.icmt-pasted-img{max-width:100%;max-height:160px;border-radius:4px;object-fit:contain;background:#000;margin-top:4px;display:block}
 .icmt-input-row{display:flex;gap:6px;align-items:center}
 .icmt-inp{flex:1;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.1);color:#e0f5ef;font-family:'Space Mono',monospace;font-size:10px;padding:6px 10px;outline:none;border-radius:2px;min-width:0}
 .icmt-inp:focus{border-color:rgba(0,255,200,0.25)}
@@ -2028,7 +2106,7 @@ body.ui-glass .taskbar,body.u1-glass .taskbar,body.u2-glass .taskbar{background:
   <!-- CENTER LOGIN BOX — sits in the "window" area of the image -->
   <div class="login-box">
     <!-- Version badge in corner -->
-    <div class="login-version" id="versionBadge">v18</div>
+    <div class="login-version" id="versionBadge">v24</div>
     <!-- MINIMALIST EYE with lashes -->
     <div class="login-eye" id="loginEye">
       <svg viewBox="0 0 100 60" xmlns="http://www.w3.org/2000/svg" width="90" height="54">
@@ -2349,5 +2427,17 @@ body.ui-glass .taskbar,body.u1-glass .taskbar,body.u2-glass .taskbar{background:
   <div class="term-wave" id="termWave"><canvas id="waveCanvas"></canvas></div>
 
 </div>
+
+<!-- GIPHY PICKER -->
+<div id="giphyPicker" style="display:none;position:fixed;bottom:80px;left:50%;transform:translateX(-50%);width:360px;max-height:380px;background:rgba(4,6,14,0.98);border:1px solid rgba(0,255,200,0.2);border-radius:6px;z-index:8000;flex-direction:column;box-shadow:0 8px 40px rgba(0,0,0,0.8),0 0 30px rgba(0,255,200,0.08)">
+  <div style="display:flex;align-items:center;gap:8px;padding:10px 12px;border-bottom:1px solid rgba(255,255,255,0.06)">
+    <input id="giphySearch" placeholder="search gifs..." style="flex:1;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.1);color:#e0f5ef;font-family:'Space Mono',monospace;font-size:10px;padding:6px 10px;border-radius:2px;outline:none" onkeydown="if(event.key==='Enter')searchGiphy()">
+    <button onclick="searchGiphy()" style="background:var(--u1-acc);color:#000;font-family:'Orbitron',monospace;font-size:8px;font-weight:700;padding:7px 10px;border:none;border-radius:2px;cursor:pointer">GO</button>
+    <button onclick="closeGiphyPicker()" style="background:rgba(255,255,255,0.06);color:rgba(255,255,255,0.5);border:none;padding:7px 10px;border-radius:2px;cursor:pointer;font-size:11px">✕</button>
+  </div>
+  <div id="giphyGrid" style="display:grid;grid-template-columns:repeat(3,1fr);gap:4px;padding:8px;overflow-y:auto;max-height:300px"></div>
+  <div style="padding:4px 12px 8px;font-family:'Space Mono',monospace;font-size:7px;color:rgba(255,255,255,0.2);text-align:right">powered by GIPHY</div>
+</div>
+
 </div>
 </html>
