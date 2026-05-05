@@ -73,7 +73,7 @@ const UI_STYLES = [
 // Color wheels — free pick via HSL
 let wheelState = { u1: '#00ffc8', u2: '#ff00cc' };
 
-let ME = null;
+const APP_VERSION = 'v18';
 let imgData = null;
 let allPosts = { Monish: {}, Prashanth: {} };
 let streaks = { Monish: 0, Prashanth: 0 };
@@ -99,6 +99,7 @@ window.bootAs = function(name) {
 };
 
 window.addEventListener('DOMContentLoaded', () => {
+  const vb = document.getElementById('versionBadge'); if(vb) vb.textContent = APP_VERSION;
   loadSettings();
   applyUIStyle(settings.uiStyle || 'default', false);
   applyColorHex('u1', settings.u1Hex || '#00ffc8', false);
@@ -1173,70 +1174,33 @@ async function uploadToDrive(base64img, filename) {
 
   const b64 = base64img.includes(',') ? base64img.split(',')[1] : base64img;
 
-  // Animate progress bar realistically
   let prog = 20;
   const progTimer = setInterval(() => {
-    prog = Math.min(prog + 8, 85);
+    prog = Math.min(prog + 18, 90);
     showDriveProgress('uploading to google drive...', prog);
-  }, 300);
+  }, 220);
 
   try {
-    // Use a hidden iframe + form POST — this bypasses CORS completely
-    // Apps Script receives it as a normal doPost, saves to Drive, returns JSON
-    const iframeId = 'driveIframe_' + Date.now();
-    const formId = 'driveForm_' + Date.now();
+    // URLSearchParams — Apps Script reads e.parameter.data correctly
+    const params = new URLSearchParams();
+    params.append('filename', filename);
+    params.append('data', b64);
+    params.append('mime', 'image/jpeg');
 
-    const iframe = document.createElement('iframe');
-    iframe.id = iframeId;
-    iframe.name = iframeId;
-    iframe.style.cssText = 'display:none;position:absolute;width:0;height:0';
-    document.body.appendChild(iframe);
-
-    const form = document.createElement('form');
-    form.id = formId;
-    form.method = 'POST';
-    form.action = settings.driveUrl;
-    form.target = iframeId;
-    form.style.cssText = 'display:none;position:absolute';
-
-    const addField = (name, val) => {
-      const inp = document.createElement('input');
-      inp.type = 'hidden'; inp.name = name; inp.value = val;
-      form.appendChild(inp);
-    };
-    addField('filename', filename);
-    addField('data', b64);
-    addField('mime', 'image/jpeg');
-
-    document.body.appendChild(form);
-
-    // Wait for iframe load = Apps Script responded
-    await new Promise((resolve, reject) => {
-      const timeout = setTimeout(() => {
-        // Timeout after 15s — Apps Script can be slow on first run
-        resolve('timeout');
-      }, 15000);
-
-      iframe.onload = () => {
-        clearTimeout(timeout);
-        resolve('done');
-      };
-      iframe.onerror = () => {
-        clearTimeout(timeout);
-        reject(new Error('iframe error'));
-      };
-
-      form.submit();
+    // no-cors: browser sends, Apps Script receives, CORS wall bypassed
+    await fetch(settings.driveUrl, {
+      method: 'POST',
+      mode: 'no-cors',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: params.toString()
     });
 
     clearInterval(progTimer);
-    form.remove();
-    iframe.remove();
-    hideDriveProgress(true, '✓ saved to google drive');
+    hideDriveProgress(true, '\u2713 sent to drive — check in ~5s');
 
   } catch(e) {
     clearInterval(progTimer);
-    hideDriveProgress(false, 'upload failed — check apps script url');
+    hideDriveProgress(false, 'network error — check url & deployment');
   }
 }
 
@@ -1825,7 +1789,7 @@ body.ui-glass .taskbar,body.u1-glass .taskbar,body.u2-glass .taskbar{background:
   <!-- CENTER LOGIN BOX — sits in the "window" area of the image -->
   <div class="login-box">
     <!-- Version badge in corner -->
-    <div class="login-version">v16</div>
+    <div class="login-version" id="versionBadge">v18</div>
     <!-- MINIMALIST EYE with lashes -->
     <div class="login-eye" id="loginEye">
       <svg viewBox="0 0 100 60" xmlns="http://www.w3.org/2000/svg" width="90" height="54">
