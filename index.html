@@ -81,7 +81,7 @@ let streaks = { Monish: 0, Prashanth: 0 };
 let lastPostDate = { Monish: '', Prashanth: '' };
 let hmapRange = { Monish: 30, Prashanth: 30 };
 let daysPer = { Monish: 1, Prashanth: 1 };
-let settings = { uiStyle:'default', u1Hex:'#00ffc8', u2Hex:'#ff00cc', appName:'ZENITH-FORGE', quotes:true, tgToken:'', tgChat:'', driveUrl:'', tenorKey:'' };
+let settings = { uiStyle:'default', u1Hex:'#00ffc8', u2Hex:'#ff00cc', appName:'ZENITH-FORGE', quotes:true, tgToken:'', tgChat:'', driveUrl:'' };
 
 function FRIEND() { return ME === 'Monish' ? 'Prashanth' : 'Monish'; }
 
@@ -143,7 +143,6 @@ function initUI() {
   if (settings.tgToken) document.getElementById('tgTokenInp').value = settings.tgToken;
   if (settings.tgChat) document.getElementById('tgChatInp').value = settings.tgChat;
   if (settings.driveUrl) document.getElementById('driveUrlInp').value = settings.driveUrl;
-  if (settings.tenorKey) document.getElementById('tenorKeyInp').value = settings.tenorKey;
 }
 
 // ── FIREBASE LISTENERS ──
@@ -218,9 +217,9 @@ function renderCol(user, containerId) {
 }
 
 function mkCard(p, key, user) {
-  const col = user === ME ? 'u1' : 'u2';
   const div = document.createElement('div');
   div.className = 'pcard';
+  div.dataset.key = key; div.dataset.user = user;
   const imgH = p.img
     ? `<div class="pimg-wrap"><img src="${p.img}" loading="lazy"></div>`
     : `<div class="pimg-none">[ no image ]</div>`;
@@ -235,9 +234,24 @@ function mkCard(p, key, user) {
         <button class="post-ctrl-btn del-btn" data-key="${key}">✕ delete</button>
        </div>`
     : '';
-  div.innerHTML = `<div class="phead"><span class="pday">day ${p.day}</span><span class="ptime">${p.time} · ${p.date}</span>${ownControls}</div>${imgH}<div class="pbody"><div class="ptxt">${p.text}</div><div class="rxns">${rxH}</div><button class="cmt-btn" data-key="${key}" data-user="${user}">💬 <span class="cmt-count" id="cmtc-${user}-${key}">0</span></button></div>`;
+  div.innerHTML = `
+    <div class="phead"><span class="pday">day ${p.day}</span><span class="ptime">${p.time} · ${p.date}</span>${ownControls}</div>
+    ${imgH}
+    <div class="pbody">
+      <div class="ptxt">${p.text}</div>
+      <div class="rxns">${rxH}</div>
+      <button class="cmt-btn" data-key="${key}" data-user="${user}">💬 <span class="cmt-count" id="cmtc-${user}-${key}">0</span></button>
+    </div>
+    <div class="inline-cmt" id="icmt-${user}-${key}" style="display:none">
+      <div class="icmt-list" id="icmtlist-${user}-${key}"></div>
+      <div class="icmt-input-row">
+        <input class="icmt-inp" id="icmtinp-${user}-${key}" placeholder="comment... (win+g → snip → paste)" maxlength="400"
+          onkeydown="if(event.key==='Enter')sendInlineComment('${key}','${user}')">
+        <button class="icmt-send" onclick="sendInlineComment('${key}','${user}')">↵</button>
+      </div>
+    </div>`;
   div.querySelectorAll('.rxn').forEach(el => el.addEventListener('click', () => doRxn(el.dataset.key, el.dataset.user, el.dataset.emoji)));
-  div.querySelector('.cmt-btn').addEventListener('click', () => openComments(key, user));
+  div.querySelector('.cmt-btn').addEventListener('click', () => toggleInlineComments(key, user));
   if (user === ME) {
     div.querySelector('.edit-btn').addEventListener('click', () => openEditModal(key, p));
     div.querySelector('.del-btn').addEventListener('click', () => confirmDelete(key));
@@ -483,7 +497,7 @@ window.makePost = async function() {
   showToast(`day ${post.day} logged ✓`);
 
   // Telegram image card
-  sendTgCard(post, newStreak);
+  sendTgCard(post, newStreak, ME);
 
   // Auto upload image to Google Drive
   if (imgData) {
@@ -950,21 +964,17 @@ async function sendTg(msg) {
 }
 
 // ── TELEGRAM IMAGE CARD ──
-async function sendTgCard(post, streakCount) {
+async function sendTgCard(post, streakCount, poster) {
   if (!settings.tgToken || !settings.tgChat) return;
+  const postUser = poster || ME;
 
   const W = 900, H = 520;
   const canvas = document.createElement('canvas');
   canvas.width = W; canvas.height = H;
   const ctx = canvas.getContext('2d');
 
-  // get accent color from current theme
-  const themeColors = {
-    scifi: '#00ffc8', cyber: '#ff00cc', space: '#88c0ff',
-    forge: '#ffaa00', void: '#c8c8c8', glass: '#4dc8ff'
-  };
-  const userTheme = ME === (document.getElementById('un1')?.textContent) ? settings.u1Theme : settings.u2Theme;
-  const acc = themeColors[userTheme] || '#00ffc8';
+  // use stored hex directly — works regardless of who is logged in
+  const acc = (postUser === 'Monish') ? settings.u1Hex : settings.u2Hex;
   const accRgb = hexToRgb(acc);
 
   // ── background ──
@@ -1052,13 +1062,13 @@ async function sendTgCard(post, streakCount) {
   ctx.font = '700 16px monospace';
   ctx.fillStyle = acc;
   ctx.textAlign = 'center';
-  ctx.fillText(ME[0].toUpperCase(), avX, avY + 6);
+  ctx.fillText(postUser[0].toUpperCase(), avX, avY + 6);
   ctx.textAlign = 'left';
 
   // name
   ctx.font = '700 22px monospace';
   ctx.fillStyle = '#ffffff';
-  ctx.fillText(ME, rightX + 58, avY - 6);
+  ctx.fillText(postUser, rightX + 58, avY - 6);
 
   // day badge
   ctx.font = '600 12px monospace';
@@ -1240,57 +1250,49 @@ window.testDriveUpload = async function() {
   await uploadToDrive(testImg, 'zenith_drive_test.jpg');
 };
 
-// ── COMMENTS + GIF ──
-let activeCmtKey = null, activeCmtUser = null, gifResults = [], gifPage = 0;
+// ── COMMENTS (INLINE) ──
+let inlineCmtListeners = {}; // postKey -> unsubscribe fn
 
-window.openComments = function(postKey, postUser) {
-  activeCmtKey = postKey;
-  activeCmtUser = postUser;
-  const panel = document.getElementById('cmtPanel');
-  panel.classList.add('open');
-  document.getElementById('cmtTitle').textContent = `comments — day ${(allPosts[postUser]?.[postKey]?.day) || '?'}`;
-  document.getElementById('cmtInp').value = '';
-  document.getElementById('gifSearch').value = '';
-  document.getElementById('gifGrid').innerHTML = '';
-  document.getElementById('gifPreview').innerHTML = '';
-  selectedGif = null;
-  loadComments(postKey, postUser);
+window.toggleInlineComments = function(postKey, postUser) {
+  const box = document.getElementById(`icmt-${postUser}-${postKey}`);
+  if (!box) return;
+  const open = box.style.display !== 'none';
+  box.style.display = open ? 'none' : 'block';
+  if (!open) {
+    loadInlineComments(postKey, postUser);
+    setTimeout(() => { const inp = document.getElementById(`icmtinp-${postUser}-${postKey}`); if(inp) inp.focus(); }, 50);
+  }
 };
 
-window.closeComments = function() {
-  document.getElementById('cmtPanel').classList.remove('open');
-  activeCmtKey = null; activeCmtUser = null;
-};
-
-let selectedGif = null;
-let cmtListener = null;
-
-function loadComments(postKey, postUser) {
-  const list = document.getElementById('cmtList');
-  list.innerHTML = '<div style="opacity:0.4;font-size:10px;text-align:center;padding:20px">loading…</div>';
-  if (cmtListener) cmtListener();
-  cmtListener = onValue(ref(db, `comments/${postUser}/${postKey}`), snap => {
+function loadInlineComments(postKey, postUser) {
+  // unsubscribe old listener for this post if any
+  if (inlineCmtListeners[postKey]) { inlineCmtListeners[postKey](); delete inlineCmtListeners[postKey]; }
+  const list = document.getElementById(`icmtlist-${postUser}-${postKey}`);
+  if (!list) return;
+  inlineCmtListeners[postKey] = onValue(ref(db, `comments/${postUser}/${postKey}`), snap => {
     const data = snap.val() || {};
-    const cmts = Object.entries(data).sort((a,b) => (a[1].ts||0) - (b[1].ts||0));
+    const cmts = Object.entries(data).sort((a,b) => (a[1].ts||0)-(b[1].ts||0));
     // update count badge
-    const el = document.getElementById(`cmtc-${postUser}-${postKey}`);
-    if (el) el.textContent = cmts.length;
+    const badge = document.getElementById(`cmtc-${postUser}-${postKey}`);
+    if (badge) badge.textContent = cmts.length;
     if (!cmts.length) {
-      list.innerHTML = '<div style="opacity:0.3;font-size:10px;text-align:center;padding:20px">no comments yet — be first</div>';
+      list.innerHTML = '<div class="icmt-empty">no comments yet</div>';
       return;
     }
     list.innerHTML = '';
     cmts.forEach(([k, c]) => {
       const isMe = c.author === ME;
       const d = document.createElement('div');
-      d.className = `cmt-item ${isMe ? 'cmt-me' : 'cmt-them'}`;
-      const content = c.gif
-        ? `<img src="${c.gif}" class="cmt-gif" loading="lazy">`
-        : `<span class="cmt-txt">${c.text}</span>`;
-      d.innerHTML = `<span class="cmt-author">${c.author}</span>${content}<span class="cmt-time">${c.time}</span>`;
+      d.className = `icmt-item ${isMe ? 'icmt-me' : 'icmt-them'}`;
+      // check if text is a pasted image (data url)
+      const isImg = c.text && c.text.startsWith('data:image');
+      const content = isImg
+        ? `<img src="${c.text}" class="icmt-pasted-img" loading="lazy">`
+        : `<span class="icmt-txt">${c.text}</span>`;
+      d.innerHTML = `<span class="icmt-author">${c.author}</span>${content}<span class="icmt-time">${c.time}</span>`;
       if (isMe) {
         const del = document.createElement('button');
-        del.className = 'cmt-del';
+        del.className = 'icmt-del';
         del.textContent = '✕';
         del.onclick = () => remove(ref(db, `comments/${postUser}/${postKey}/${k}`));
         d.appendChild(del);
@@ -1301,60 +1303,54 @@ function loadComments(postKey, postUser) {
   });
 }
 
-window.sendComment = async function() {
-  if (!activeCmtKey) return;
-  const txt = document.getElementById('cmtInp').value.trim();
-  if (!txt && !selectedGif) return;
+window.sendInlineComment = async function(postKey, postUser) {
+  const inp = document.getElementById(`icmtinp-${postUser}-${postKey}`);
+  if (!inp) return;
+  const txt = inp.value.trim();
+  if (!txt) return;
   const now = new Date();
-  const cmt = {
+  await push(ref(db, `comments/${postUser}/${postKey}`), {
     author: ME,
-    text: txt || '',
-    gif: selectedGif || null,
+    text: txt,
     ts: Date.now(),
     time: now.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})
-  };
-  await push(ref(db, `comments/${activeCmtUser}/${activeCmtKey}`), cmt);
-  document.getElementById('cmtInp').value = '';
-  selectedGif = null;
-  document.getElementById('gifPreview').innerHTML = '';
-  document.getElementById('gifSearch').value = '';
-  document.getElementById('gifGrid').innerHTML = '';
+  });
+  inp.value = '';
 };
 
-window.searchGifs = async function() {
-  const q = document.getElementById('gifSearch').value.trim();
-  if (!q) return;
-  if (!settings.tenorKey) { showToast('add tenor api key in settings'); return; }
-  const url = `https://tenor.googleapis.com/v2/search?q=${encodeURIComponent(q)}&key=${settings.tenorKey}&limit=12&media_filter=gif`;
-  try {
-    const res = await fetch(url);
-    const data = await res.json();
-    const grid = document.getElementById('gifGrid');
-    grid.innerHTML = '';
-    (data.results || []).forEach(r => {
-      const gif = r.media_formats?.gif?.url || r.media_formats?.tinygif?.url;
-      if (!gif) return;
-      const img = document.createElement('img');
-      img.src = gif;
-      img.className = 'gif-thumb';
-      img.loading = 'lazy';
-      img.onclick = () => {
-        selectedGif = gif;
-        document.getElementById('gifPreview').innerHTML = `<img src="${gif}" class="gif-selected"><button onclick="selectedGif=null;document.getElementById('gifPreview').innerHTML=''" style="background:none;border:none;color:rgba(255,80,80,0.7);cursor:pointer;font-size:12px">✕ remove</button>`;
-        grid.innerHTML = '';
-        document.getElementById('gifSearch').value = '';
+// paste handler — catches Win+G screenshots pasted into comment inputs
+document.addEventListener('paste', async (e) => {
+  const active = document.activeElement;
+  if (!active || !active.classList.contains('icmt-inp')) return;
+  const items = (e.clipboardData || e.originalEvent?.clipboardData)?.items;
+  if (!items) return;
+  for (const item of items) {
+    if (item.type.startsWith('image/')) {
+      e.preventDefault();
+      const blob = item.getAsFile();
+      const reader = new FileReader();
+      reader.onload = async (ev) => {
+        const dataUrl = ev.target.result;
+        // find which post this input belongs to
+        const id = active.id; // icmtinp-{user}-{key}
+        const parts = id.replace('icmtinp-','').split('-');
+        const postUser = parts[0];
+        const postKey = parts.slice(1).join('-');
+        const now = new Date();
+        await push(ref(db, `comments/${postUser}/${postKey}`), {
+          author: ME,
+          text: dataUrl,
+          ts: Date.now(),
+          time: now.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})
+        });
+        showToast('screenshot sent ✓');
       };
-      grid.appendChild(img);
-    });
-  } catch(e) { showToast('gif search failed'); }
-};
+      reader.readAsDataURL(blob);
+      break;
+    }
+  }
+});
 
-window.saveTenorKey = function() {
-  const v = document.getElementById('tenorKeyInp').value.trim();
-  settings.tenorKey = v;
-  saveSettings();
-  showToast('tenor key saved ✓');
-};
 
 // ── WEEKLY REPORT ──
 window.showWeeklyReport = function() {
@@ -1758,38 +1754,25 @@ body.ui-glass .taskbar,body.u1-glass .taskbar,body.u2-glass .taskbar{background:
 .rxns{display:flex;gap:4px;margin-top:8px;flex-wrap:wrap}
 .cmt-btn{background:none;border:none;color:rgba(255,255,255,0.3);font-family:'Space Mono',monospace;font-size:10px;cursor:pointer;margin-top:6px;padding:3px 0;transition:color 0.2s;letter-spacing:0.05em}
 .cmt-btn:hover{color:rgba(255,255,255,0.7)}
-/* Comment Panel */
-#cmtPanel{position:fixed;inset:0;z-index:300;display:flex;flex-direction:column;background:#030508;transform:translateY(100%);transition:transform 0.3s cubic-bezier(0.16,1,0.3,1)}
-#cmtPanel.open{transform:translateY(0)}
-.cmt-hdr{display:flex;align-items:center;justify-content:space-between;padding:14px 16px;border-bottom:1px solid rgba(255,255,255,0.07)}
-#cmtTitle{font-family:'Orbitron',monospace;font-size:11px;color:rgba(255,255,255,0.7);letter-spacing:0.12em}
-.cmt-close{background:none;border:none;color:rgba(255,255,255,0.4);font-size:18px;cursor:pointer;padding:0}
-#cmtList{flex:1;overflow-y:auto;padding:12px 16px;display:flex;flex-direction:column;gap:10px}
-.cmt-item{display:flex;flex-direction:column;max-width:80%;gap:3px}
-.cmt-me{align-self:flex-end;align-items:flex-end}
-.cmt-them{align-self:flex-start;align-items:flex-start}
-.cmt-author{font-family:'Space Mono',monospace;font-size:8px;letter-spacing:0.1em;opacity:0.4}
-.cmt-txt{font-family:'Rajdhani',sans-serif;font-size:14px;padding:8px 12px;border-radius:12px;line-height:1.4}
-.cmt-me .cmt-txt{background:rgba(0,255,200,0.12);color:rgba(0,255,200,0.9);border-bottom-right-radius:3px}
-.cmt-them .cmt-txt{background:rgba(255,255,255,0.07);color:rgba(255,255,255,0.8);border-bottom-left-radius:3px}
-.cmt-gif{max-width:200px;max-height:150px;border-radius:8px;object-fit:cover}
-.cmt-time{font-size:8px;opacity:0.3;font-family:'Space Mono',monospace}
-.cmt-del{background:none;border:none;color:rgba(255,80,80,0.4);cursor:pointer;font-size:10px;padding:0 4px}
-.cmt-del:hover{color:rgba(255,80,80,0.9)}
-/* GIF search */
-.cmt-foot{border-top:1px solid rgba(255,255,255,0.07);padding:10px 16px;display:flex;flex-direction:column;gap:8px}
-.gif-row{display:flex;gap:8px}
-#gifSearch{flex:1;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.1);color:#fff;font-family:'Space Mono',monospace;font-size:10px;padding:8px 10px;border-radius:6px;outline:none}
-.gif-srch-btn{background:rgba(255,255,255,0.07);border:1px solid rgba(255,255,255,0.15);color:rgba(255,255,255,0.6);font-family:'Space Mono',monospace;font-size:10px;padding:8px 12px;border-radius:6px;cursor:pointer;white-space:nowrap}
-#gifGrid{display:grid;grid-template-columns:repeat(4,1fr);gap:4px;max-height:120px;overflow-y:auto}
-.gif-thumb{width:100%;aspect-ratio:1;object-fit:cover;border-radius:4px;cursor:pointer;border:1px solid transparent;transition:border-color 0.15s}
-.gif-thumb:hover{border-color:rgba(0,255,200,0.5)}
-#gifPreview{display:flex;align-items:center;gap:8px}
-.gif-selected{max-height:60px;border-radius:6px}
-.send-row{display:flex;gap:8px}
-#cmtInp{flex:1;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.1);color:#fff;font-family:'Rajdhani',sans-serif;font-size:14px;padding:9px 12px;border-radius:8px;outline:none;resize:none}
-.cmt-send{background:rgba(0,255,200,0.15);border:1px solid rgba(0,255,200,0.3);color:rgba(0,255,200,0.9);font-family:'Orbitron',monospace;font-size:10px;padding:9px 14px;border-radius:8px;cursor:pointer;letter-spacing:0.08em;transition:all 0.2s}
-.cmt-send:hover{background:rgba(0,255,200,0.25)}
+/* ── INLINE COMMENTS ── */
+.inline-cmt{border-top:1px solid rgba(255,255,255,0.06);background:rgba(0,0,0,0.2);padding:8px 10px}
+.icmt-list{display:flex;flex-direction:column;gap:6px;max-height:180px;overflow-y:auto;margin-bottom:8px}
+.icmt-empty{font-family:'Space Mono',monospace;font-size:8px;color:rgba(255,255,255,0.25);text-align:center;padding:8px 0}
+.icmt-item{display:flex;flex-wrap:wrap;align-items:baseline;gap:5px;padding:4px 0;border-bottom:1px solid rgba(255,255,255,0.04)}
+.icmt-author{font-family:'Space Mono',monospace;font-size:8px;letter-spacing:0.08em;opacity:0.5;flex-shrink:0}
+.icmt-me .icmt-author{color:var(--u1-acc)}
+.icmt-them .icmt-author{color:var(--u2-acc)}
+.icmt-txt{font-size:12px;color:rgba(255,255,255,0.82);line-height:1.4;flex:1;word-break:break-word}
+.icmt-time{font-family:'Space Mono',monospace;font-size:7px;color:rgba(255,255,255,0.25);margin-left:auto}
+.icmt-del{background:none;border:none;color:rgba(255,80,80,0.35);cursor:pointer;font-size:9px;padding:0 3px;flex-shrink:0}
+.icmt-del:hover{color:rgba(255,80,80,0.8)}
+.icmt-pasted-img{max-width:100%;max-height:140px;border-radius:4px;object-fit:contain;background:#000;margin-top:3px;display:block}
+.icmt-input-row{display:flex;gap:6px;align-items:center}
+.icmt-inp{flex:1;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.1);color:#e0f5ef;font-family:'Space Mono',monospace;font-size:10px;padding:6px 10px;outline:none;border-radius:2px;min-width:0}
+.icmt-inp:focus{border-color:rgba(0,255,200,0.25)}
+.icmt-inp::placeholder{color:rgba(255,255,255,0.2)}
+.icmt-send{background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.12);color:rgba(255,255,255,0.5);font-size:14px;width:30px;height:30px;cursor:pointer;border-radius:2px;flex-shrink:0;transition:all 0.15s}
+.icmt-send:hover{background:rgba(0,255,200,0.12);border-color:rgba(0,255,200,0.3);color:rgba(0,255,200,0.8)}
 /* Weekly Report */
 #weeklyPanel{position:fixed;inset:0;z-index:300;background:rgba(3,5,8,0.96);display:flex;flex-direction:column;align-items:center;justify-content:center;transform:translateY(100%);transition:transform 0.35s cubic-bezier(0.16,1,0.3,1);padding:24px}
 #weeklyPanel.open{transform:translateY(0)}
@@ -1999,26 +1982,6 @@ body.ui-glass .taskbar,body.u1-glass .taskbar,body.u2-glass .taskbar{background:
 <div id="app">
 
 <!-- EASTER EGG -->
-<!-- COMMENT PANEL -->
-<div id="cmtPanel">
-  <div class="cmt-hdr">
-    <span id="cmtTitle">comments</span>
-    <button class="cmt-close" onclick="closeComments()">✕</button>
-  </div>
-  <div id="cmtList"></div>
-  <div class="cmt-foot">
-    <div id="gifPreview"></div>
-    <div id="gifGrid"></div>
-    <div class="gif-row">
-      <input id="gifSearch" placeholder="search gifs…" onkeydown="if(event.key==='Enter')searchGifs()">
-      <button class="gif-srch-btn" onclick="searchGifs()">search</button>
-    </div>
-    <div class="send-row">
-      <textarea id="cmtInp" placeholder="add a comment…" rows="2" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendComment()}"></textarea>
-      <button class="cmt-send" onclick="sendComment()">send</button>
-    </div>
-  </div>
-</div>
 
 <!-- WEEKLY REPORT PANEL -->
 <div id="weeklyPanel">
@@ -2174,16 +2137,6 @@ body.ui-glass .taskbar,body.u1-glass .taskbar,body.u2-glass .taskbar{background:
         </div>
         <div class="sinp-hint">messages go directly to your telegram group on every post</div>
         <button class="sbtn" style="margin-top:10px;width:100%" onclick="testTg()">send test message</button>
-      </div>
-
-      <!-- TENOR GIF API -->
-      <div class="ssec">
-        <div class="slbl">gif search (tenor)</div>
-        <div class="ssubl" style="margin-bottom:10px">get a free key at tenor.com/gifapi — needed for gif comments</div>
-        <div class="srow">
-          <input class="sinp" id="tenorKeyInp" placeholder="paste tenor api key" style="margin:0;flex:1">
-          <button class="sbtn" onclick="saveTenorKey()">save</button>
-        </div>
       </div>
 
       <!-- GOOGLE DRIVE -->
