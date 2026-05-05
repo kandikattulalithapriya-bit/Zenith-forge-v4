@@ -74,7 +74,7 @@ const UI_STYLES = [
 // Color wheels — free pick via HSL
 let wheelState = { u1: '#00ffc8', u2: '#ff00cc' };
 
-const APP_VERSION = 'v24';
+const APP_VERSION = 'v25';
 let imgData = null;
 let allPosts = { Monish: {}, Prashanth: {} };
 let streaks = { Monish: 0, Prashanth: 0 };
@@ -1285,10 +1285,13 @@ function loadInlineComments(postKey, postUser) {
       const isMe = c.author === ME;
       const d = document.createElement('div');
       d.className = `icmt-item ${isMe ? 'icmt-me' : 'icmt-them'}`;
-      // check if text is a pasted image (data url)
-      const isImg = c.text && c.text.startsWith('data:image');
+      // render as image: data URLs OR http URLs pointing to image/gif files
+      const isImg = c.text && (
+        c.text.startsWith('data:image') ||
+        /^https?:\/\/.+\.(gif|png|jpg|jpeg|webp)(\?.*)?$/i.test(c.text.trim())
+      );
       const content = isImg
-        ? `<img src="${c.text}" class="icmt-pasted-img" loading="lazy">`
+        ? `<img src="${c.text}" class="icmt-pasted-img" loading="lazy" style="max-height:200px;border-radius:4px;display:block;margin-top:4px">`
         : `<span class="icmt-txt">${c.text}</span>`;
       d.innerHTML = `<span class="icmt-author">${c.author}</span>${content}<span class="icmt-time">${c.time}</span>`;
       if (isMe) {
@@ -1320,7 +1323,7 @@ window.sendInlineComment = async function(postKey, postUser) {
 };
 
 // ── GIPHY SETTINGS ──
-const GIPHY_KEY = 'B7OCuA0LKCGUyZuMtGeuLOpY8AuwcDCC'; // get free key at developers.giphy.com
+const GIPHY_KEY = 'PASTE_YOUR_GIPHY_KEY_HERE'; // get free key at developers.giphy.com
 let giphyTarget = null; // {postKey, postUser} for which comment box the picker is for
 
 window.openGiphyPicker = function(postKey, postUser) {
@@ -2106,7 +2109,7 @@ body.ui-glass .taskbar,body.u1-glass .taskbar,body.u2-glass .taskbar{background:
   <!-- CENTER LOGIN BOX — sits in the "window" area of the image -->
   <div class="login-box">
     <!-- Version badge in corner -->
-    <div class="login-version" id="versionBadge">v24</div>
+    <div class="login-version" id="versionBadge">v25</div>
     <!-- MINIMALIST EYE with lashes -->
     <div class="login-eye" id="loginEye">
       <svg viewBox="0 0 100 60" xmlns="http://www.w3.org/2000/svg" width="90" height="54">
