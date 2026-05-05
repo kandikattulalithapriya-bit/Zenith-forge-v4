@@ -129,7 +129,9 @@ function initUI() {
   // my column
   document.getElementById('av1').textContent = ME[0];
   document.getElementById('un1').textContent = ME;
-  document.getElementById('compName1').textContent = ME;
+  // taskbar badge
+  const tbAv = document.getElementById('tbAv'); if(tbAv) tbAv.textContent = ME[0];
+  const tbName = document.getElementById('tbName'); if(tbName) tbName.textContent = ME;
   // friend column
   document.getElementById('av2').textContent = fr[0];
   document.getElementById('un2').textContent = fr;
@@ -429,8 +431,8 @@ window.handleImg = function(ev) {
       canvas.width = w; canvas.height = h;
       canvas.getContext('2d').drawImage(img, 0, 0, w, h);
       imgData = canvas.toDataURL('image/jpeg', 0.75);
-      document.getElementById('prevImg1').src = imgData;
-      document.getElementById('iprev1').style.display = 'flex';
+      const tbp = document.getElementById('tbPrev'); if(tbp) tbp.style.display='flex';
+      const tbi = document.getElementById('tbPrevImg'); if(tbi) tbi.src = imgData;
     };
     img.src = e.target.result;
   };
@@ -440,7 +442,7 @@ window.handleImg = function(ev) {
 window.clearImg = function() {
   imgData = null;
   document.getElementById('fup1').value = '';
-  document.getElementById('iprev1').style.display = 'none';
+  const tbp = document.getElementById('tbPrev'); if(tbp) tbp.style.display='none';
 };
 
 window.makePost = async function() {
@@ -1278,6 +1280,25 @@ body.u1-glass .sett,body.u2-glass .sett{background:rgba(7,9,26,0.94);backdrop-fi
 .hbtn.danger{border-color:rgba(255,80,80,0.3);color:rgba(255,80,80,0.5)}
 .hbtn.danger:hover{border-color:rgba(255,80,80,0.7);color:rgba(255,80,80,0.9);background:rgba(255,80,80,0.05)}
 
+/* ── TASKBAR COMPOSER ── */
+.taskbar{display:flex;align-items:center;gap:8px;padding:7px 14px;background:rgba(3,5,8,0.98);border-bottom:1px solid var(--u1-brd2);flex-shrink:0;position:sticky;top:0;z-index:49;backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);box-shadow:0 2px 20px rgba(0,0,0,0.5)}
+.tb-user-badge{display:flex;align-items:center;gap:6px;flex-shrink:0;padding:4px 10px 4px 4px;border:1px solid var(--u1-brd2);border-radius:20px;background:var(--u1-acc2)}
+.tb-av{width:22px;height:22px;border-radius:50%;border:1px solid var(--u1-accl);background:var(--u1-acc2);color:var(--u1-acc);font-family:'Orbitron',monospace;font-size:9px;font-weight:700;display:flex;align-items:center;justify-content:center;box-shadow:0 0 8px var(--u1-accl)}
+.tb-name{font-family:'Orbitron',monospace;font-size:8px;font-weight:700;color:var(--u1-acc);letter-spacing:0.12em;text-transform:uppercase}
+.tb-attach{width:30px;height:30px;display:flex;align-items:center;justify-content:center;border:1px solid rgba(255,255,255,0.1);border-radius:2px;color:rgba(255,255,255,0.5);cursor:pointer;flex-shrink:0;transition:all 0.2s}
+.tb-attach:hover{border-color:var(--u1-acc);color:var(--u1-acc);background:var(--u1-acc2)}
+.tb-inp{flex:1;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.1);color:rgba(255,255,255,0.9);font-family:'Space Mono',monospace;font-size:11px;padding:7px 12px;border-radius:2px;outline:none;min-width:0;transition:border-color 0.2s}
+.tb-inp:focus{border-color:var(--u1-brd2);background:rgba(255,255,255,0.06)}
+.tb-inp::placeholder{color:rgba(255,255,255,0.25)}
+.tb-post{background:var(--u1-acc);color:#000;font-family:'Orbitron',monospace;font-size:9px;font-weight:700;letter-spacing:0.1em;padding:8px 16px;border:none;border-radius:2px;cursor:pointer;display:flex;align-items:center;gap:5px;flex-shrink:0;transition:all 0.2s;text-transform:uppercase;box-shadow:0 0 14px var(--u1-accl)}
+.tb-post:hover{filter:brightness(1.15);box-shadow:0 0 22px var(--u1-accl)}
+.tb-prev{display:flex;align-items:center;gap:4px;flex-shrink:0}
+.tb-clr{background:rgba(255,80,80,0.15);border:1px solid rgba(255,80,80,0.3);color:rgba(255,80,80,0.8);font-size:9px;padding:2px 6px;cursor:pointer;border-radius:2px}
+/* terminal taskbar */
+body.ui-terminal .taskbar,body.u1-terminal .taskbar,body.u2-terminal .taskbar{background:#000!important;border-bottom:1px dashed rgba(123,92,240,0.4)!important}
+/* glass taskbar */
+body.ui-glass .taskbar,body.u1-glass .taskbar,body.u2-glass .taskbar{background:rgba(5,8,20,0.75)!important;backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px)}
+
 /* ── QUOTE ── */
 /* quote now inline in header */
 .hdr-quote{flex:1;display:flex;align-items:center;gap:8px;overflow:hidden;padding:0 16px;min-width:0}
@@ -1298,7 +1319,7 @@ body.u1-glass .sett,body.u2-glass .sett{background:rgba(7,9,26,0.94);backdrop-fi
 .col:last-child{border-right:none}
 .col-u1{background:linear-gradient(180deg,var(--u1-bg) 0%,#030508 100%)}
 .col-u2{background:linear-gradient(180deg,var(--u2-bg) 0%,#030508 100%)}
-.col-header{padding:11px 14px;border-bottom:1px solid rgba(255,255,255,0.05);display:flex;align-items:center;gap:10px;position:sticky;top:57px;z-index:5;backdrop-filter:blur(8px)}
+.col-header{padding:11px 14px;border-bottom:1px solid rgba(255,255,255,0.05);display:flex;align-items:center;gap:10px;position:sticky;top:0;z-index:5;backdrop-filter:blur(8px)}
 .col-u1 .col-header{background:rgba(3,5,8,0.92);border-bottom-color:var(--u1-brd)}
 .col-u2 .col-header{background:rgba(8,0,16,0.92);border-bottom-color:var(--u2-brd)}
 .col-av{width:32px;height:32px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-family:'Orbitron',monospace;font-size:11px;font-weight:700;flex-shrink:0}
@@ -1696,12 +1717,33 @@ body.u1-glass .sett,body.u2-glass .sett{background:rgba(7,9,26,0.94);backdrop-fi
     </div>
   </div>
 
+  <!-- TASKBAR COMPOSER — always visible, like Windows taskbar -->
+  <div class="taskbar" id="taskbar">
+    <div class="tb-user-badge" id="tbBadge">
+      <div class="tb-av" id="tbAv">M</div>
+      <span class="tb-name" id="tbName">Monish</span>
+    </div>
+    <div class="tb-attach" onclick="document.getElementById('fup1').click()" title="attach image">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
+    </div>
+    <input type="file" id="fup1" accept="image/*" style="display:none" onchange="handleImg(event)">
+    <div class="tb-prev" id="tbPrev" style="display:none">
+      <img id="tbPrevImg" style="height:28px;border-radius:2px;border:1px solid var(--u1-brd2)">
+      <button class="tb-clr" onclick="clearImg()">✕</button>
+    </div>
+    <input class="tb-inp" id="pinp1" placeholder="what did you forge today..." onkeydown="if(event.key==='Enter'){makePost();event.preventDefault()}">
+    <button class="tb-post" onclick="makePost()">
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+      POST
+    </button>
+  </div>
+
 
 
 
 
   <!-- FEED -->
-  <div id="feedView" style="display:flex;flex-direction:column;flex:1;min-height:0;overflow:hidden">
+  <div id="feedView" style="display:flex;flex:1;min-height:0;overflow:hidden">
     <div class="dual-feed" style="flex:1">
       <div class="col col-u1">
         <div class="col-header">
@@ -1724,27 +1766,6 @@ body.u1-glass .sett,body.u2-glass .sett{background:rgba(7,9,26,0.94);backdrop-fi
           <div class="streak-badge"><span class="streak-n" id="us2n">0</span><span class="streak-l">streak</span></div>
         </div>
         <div class="col-scroll" id="feedCont2"></div>
-      </div>
-    </div>
-    <div class="composer">
-      <div class="comp-inner">
-        <div class="comp-col">
-          <div class="comp-lbl">post as <span id="compName1">you</span></div>
-          <div class="comp-row">
-            <div class="cup" onclick="document.getElementById('fup1').click()">📎</div>
-            <input type="file" id="fup1" accept="image/*" style="display:none" onchange="handleImg(event)">
-            <input class="cinp" id="pinp1" placeholder="what did you forge today..." onkeydown="if(event.key==='Enter'){makePost();event.preventDefault()}">
-            <button class="csend" onclick="makePost()">POST ↑</button>
-          </div>
-          <div class="iprev" id="iprev1">
-            <img class="iprevimg" id="prevImg1">
-            <button class="iclr" onclick="clearImg()">✕ remove</button>
-          </div>
-        </div>
-        <div class="comp-col">
-          <div class="comp-friend-lbl" id="friendCompLbl">friend's column</div>
-          <div class="comp-friend-placeholder">posts appear here in real time ↑</div>
-        </div>
       </div>
     </div>
   </div>
