@@ -24,7 +24,43 @@ const db = getDatabase(app);
 
 const USERS = ['Monish','Prashanth'];
 const EMOJIS = ['🔥','💀','⚡','🫡','👁️','🏆'];
-const QUOTES = ["the work is the proof.","consistency is the only currency that compounds.","what you do in silence becomes your loudest statement.","discipline is remembering what you want.","to exist is to iterate.","make it, make it — the rest is noise.","your craft is your autobiography.","great things are forged in ordinary moments.","the present moment always will have been.","an epoch is built one day at a time.","output is the only metric that matters.","mastery is the compound interest of effort."];
+const QUOTES = [
+  // Bhagavad Gita
+  "You have a right to perform your prescribed duties, but you are not entitled to the fruits of your actions. — Bhagavad Gita 2.47",
+  "Let right deeds be thy motive, not the fruit which comes from them. — Bhagavad Gita",
+  "The soul is never born nor dies at any time. It has not come into being, does not come into being, and will not come into being. — Bhagavad Gita 2.20",
+  "Rise above the dualities of pleasure and pain. — Bhagavad Gita 2.38",
+  "A person can rise through the efforts of his own mind, or draw himself down. — Bhagavad Gita 6.5",
+  "Excellence is not a destination but a continuous journey that never ends. — Bhagavad Gita",
+  // Bible
+  "Whatever you do, work at it with all your heart, as working for the Lord. — Colossians 3:23",
+  "I can do all things through Christ who strengthens me. — Philippians 4:13",
+  "For I know the plans I have for you, plans to prosper you and not to harm you. — Jeremiah 29:11",
+  "The beginning of wisdom is this: Get wisdom, and whatever you get, get insight. — Proverbs 4:7",
+  "Commit to the Lord whatever you do, and he will establish your plans. — Proverbs 16:3",
+  "Be strong and courageous. Do not be afraid; do not be discouraged. — Joshua 1:9",
+  // Quran
+  "Verily, with hardship comes ease. — Quran 94:6",
+  "And He found you lost and guided you. — Quran 93:7",
+  "Allah does not burden a soul beyond that it can bear. — Quran 2:286",
+  "So truly where there is hardship there is also ease. — Quran 94:5",
+  // Stoic
+  "Waste no more time arguing what a good man should be. Be one. — Marcus Aurelius",
+  "It is not death that a man should fear, but he should fear never beginning to live. — Marcus Aurelius",
+  "We suffer more in imagination than in reality. — Seneca",
+  "Luck is what happens when preparation meets opportunity. — Seneca",
+  "The impediment to action advances action. What stands in the way becomes the way. — Marcus Aurelius",
+  // Original / Universal
+  "the work is the proof.",
+  "consistency is the only currency that compounds.",
+  "what you do in silence becomes your loudest statement.",
+  "discipline is remembering what you want.",
+  "an epoch is built one day at a time.",
+  "output is the only metric that matters.",
+  "mastery is the compound interest of effort.",
+  "great things are forged in ordinary moments.",
+  "the present moment always will have been.",
+];
 const RANGES = [{l:'30d',d:30},{l:'2m',d:60},{l:'3m',d:90},{l:'6m',d:180},{l:'1yr',d:365}];
 // UI styles — overall look
 const UI_STYLES = [
@@ -104,7 +140,7 @@ function initUI() {
   document.getElementById('logoutBtn').textContent = 'logout (' + ME + ')';
   updateQuote();
   buildTGrids(); // builds style grid + color grids
-  document.getElementById('qbar').style.display = settings.quotes ? 'flex' : 'none';
+  const qb = document.getElementById('qbar'); if(qb) qb.style.visibility = settings.quotes ? 'visible' : 'hidden';
   document.getElementById('tog-quotes').classList.toggle('on', settings.quotes);
   // populate saved config
   if (settings.tgToken) document.getElementById('tgTokenInp').value = settings.tgToken;
@@ -487,7 +523,7 @@ window.saveAN = function() {
 window.togQuotes = function(el) {
   settings.quotes = !settings.quotes;
   el.classList.toggle('on', settings.quotes);
-  document.getElementById('qbar').style.display = settings.quotes ? 'flex' : 'none';
+  const qb = document.getElementById('qbar'); if(qb) qb.style.visibility = settings.quotes ? 'visible' : 'hidden';
   saveSettings();
 };
 window.logout = function() {
@@ -1233,18 +1269,22 @@ body.u1-glass .sett,body.u2-glass .sett{background:rgba(7,9,26,0.94);backdrop-fi
 .login-hint{font-family:'Space Mono',monospace;font-size:7px;color:rgba(255,255,255,0.18);text-align:center;letter-spacing:0.1em}
 
 /* ── HEADER ── */
-.hdr{display:flex;align-items:center;justify-content:space-between;padding:11px 20px;border-bottom:1px solid rgba(255,255,255,0.07);background:rgba(3,5,8,0.95);position:sticky;top:0;z-index:50;flex-shrink:0}
+.hdr{display:flex;align-items:center;justify-content:space-between;padding:8px 16px;border-bottom:1px solid rgba(255,255,255,0.07);background:rgba(3,5,8,0.97);position:sticky;top:0;z-index:50;flex-shrink:0;gap:8px}
 .hdr-logo{font-family:'Orbitron',monospace;font-size:15px;font-weight:900;color:var(--u1-acc);letter-spacing:0.2em;text-transform:uppercase;text-shadow:var(--u1-glow)}
 .hdr-sub{font-family:'Space Mono',monospace;font-size:7px;color:rgba(255,255,255,0.3);letter-spacing:0.2em;text-transform:uppercase;margin-top:1px}
-.hdr-right{display:flex;gap:6px;align-items:center}
-.hbtn{background:transparent;border:1px solid rgba(255,255,255,0.12);color:rgba(255,255,255,0.5);font-family:'Space Mono',monospace;font-size:7px;padding:5px 10px;cursor:pointer;letter-spacing:0.1em;text-transform:uppercase;transition:all 0.2s;border-radius:2px;white-space:nowrap}
+.hdr-right{display:flex;gap:4px;align-items:center;flex-shrink:0}
+.hbtn{background:transparent;border:1px solid rgba(255,255,255,0.1);color:rgba(255,255,255,0.5);font-family:'Space Mono',monospace;font-size:7px;padding:4px 8px;cursor:pointer;letter-spacing:0.08em;text-transform:uppercase;transition:all 0.2s;border-radius:2px;white-space:nowrap}
 .hbtn:hover,.hbtn.on{border-color:var(--u1-acc);color:var(--u1-acc);background:var(--u1-acc2);box-shadow:0 0 8px var(--u1-acc2)}
 .hbtn.danger{border-color:rgba(255,80,80,0.3);color:rgba(255,80,80,0.5)}
 .hbtn.danger:hover{border-color:rgba(255,80,80,0.7);color:rgba(255,80,80,0.9);background:rgba(255,80,80,0.05)}
 
 /* ── QUOTE ── */
-.qbar{padding:7px 20px;border-bottom:1px solid rgba(255,255,255,0.05);background:rgba(255,255,255,0.02);font-family:'Space Mono',monospace;font-size:9px;color:rgba(255,255,255,0.4);letter-spacing:0.04em;display:flex;align-items:center;gap:10px;flex-shrink:0}
-.qline{width:2px;height:10px;background:var(--u1-acc);opacity:0.5;flex-shrink:0}
+/* quote now inline in header */
+.hdr-quote{flex:1;display:flex;align-items:center;gap:8px;overflow:hidden;padding:0 16px;min-width:0}
+.qline-inline{color:var(--u1-acc);opacity:0.5;font-size:12px;flex-shrink:0}
+.qtxt-inline{font-family:'Space Mono',monospace;font-size:8px;color:rgba(255,255,255,0.38);letter-spacing:0.03em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.hdr-divider{width:1px;height:16px;background:rgba(255,255,255,0.1);flex-shrink:0;margin:0 2px}
+.hdr-left{flex-shrink:0}
 
 /* ── TABS ── */
 .ntabs{display:flex;border-bottom:1px solid rgba(255,255,255,0.06);background:rgba(3,5,8,0.8);flex-shrink:0}
@@ -1637,28 +1677,28 @@ body.u1-glass .sett,body.u2-glass .sett{background:rgba(7,9,26,0.94);backdrop-fi
   </div>
 
   <div class="hdr">
-    <div>
+    <div class="hdr-left">
       <div class="hdr-logo" id="logoTxt">ZENITH-FORGE</div>
-      <div class="hdr-sub">productivity awaits</div>
+    </div>
+    <div class="hdr-quote" id="qbar">
+      <span class="qline-inline">|</span>
+      <span id="qtxt" class="qtxt-inline"></span>
     </div>
     <div class="hdr-right">
-      <button class="hbtn" onclick="togSett()">⚙ config</button>
-      <button class="hbtn danger" id="logoutBtn" onclick="logout()">logout</button>
+      <button class="hbtn on" id="nt-feed" onclick="goTab('feed')">feed</button>
+      <button class="hbtn" id="nt-timeline" onclick="goTab('timeline')">timeline</button>
+      <button class="hbtn" id="nt-heatmap" onclick="goTab('heatmap')">heatmap</button>
+      <button class="hbtn" id="nt-search" onclick="goTab('search')">search</button>
+      <button class="hbtn" id="nt-export" onclick="goTab('export')">export</button>
+      <div class="hdr-divider"></div>
+      <button class="hbtn" onclick="togSett()">⚙</button>
+      <button class="hbtn danger" id="logoutBtn" onclick="logout()">↪</button>
     </div>
   </div>
 
-  <div class="qbar" id="qbar">
-    <div class="qline"></div>
-    <span id="qtxt"></span>
-  </div>
 
-  <div class="ntabs">
-    <div class="ntab on" id="nt-feed" onclick="goTab('feed')">▶ feed</div>
-    <div class="ntab" id="nt-timeline" onclick="goTab('timeline')">◎ timeline</div>
-    <div class="ntab" id="nt-heatmap" onclick="goTab('heatmap')">◈ heatmap</div>
-    <div class="ntab" id="nt-search" onclick="goTab('search')">⌕ search</div>
-    <div class="ntab" id="nt-export" onclick="goTab('export')">↓ export</div>
-  </div>
+
+
 
   <!-- FEED -->
   <div id="feedView" style="display:flex;flex-direction:column;flex:1;min-height:0;overflow:hidden">
