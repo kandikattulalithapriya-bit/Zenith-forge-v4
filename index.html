@@ -69,16 +69,8 @@ const UI_STYLES = [
   {id:'glass',    label:'GLASS',    sub:'frosted panels', dot:'#4dc8ff', bg:'#07091a'},
 ];
 // Colors — accent per side
-const COLORS = [
-  {id:'cyan',    label:'cyan',    dot:'#00ffc8'},
-  {id:'magenta', label:'magenta', dot:'#ff00cc'},
-  {id:'blue',    label:'blue',    dot:'#88c0ff'},
-  {id:'amber',   label:'amber',   dot:'#ffaa00'},
-  {id:'white',   label:'white',   dot:'#c8c8c8'},
-  {id:'purple',  label:'purple',  dot:'#7b5cf0'},
-  {id:'green',   label:'green',   dot:'#39ff14'},
-  {id:'red',     label:'red',     dot:'#ff4444'},
-];
+// Color wheels — free pick via HSL
+let wheelState = { u1: '#00ffc8', u2: '#ff00cc' };
 
 let ME = null;
 let imgData = null;
@@ -87,7 +79,7 @@ let streaks = { Monish: 0, Prashanth: 0 };
 let lastPostDate = { Monish: '', Prashanth: '' };
 let hmapRange = { Monish: 30, Prashanth: 30 };
 let daysPer = { Monish: 1, Prashanth: 1 };
-let settings = { uiStyle:'default', u1Color:'cyan', u2Color:'magenta', appName:'ZENITH-FORGE', quotes:true, tgToken:'', tgChat:'', driveUrl:'' };
+let settings = { uiStyle:'default', u1Hex:'#00ffc8', u2Hex:'#ff00cc', appName:'ZENITH-FORGE', quotes:true, tgToken:'', tgChat:'', driveUrl:'' };
 
 function FRIEND() { return ME === 'Monish' ? 'Prashanth' : 'Monish'; }
 
@@ -108,8 +100,8 @@ window.bootAs = function(name) {
 window.addEventListener('DOMContentLoaded', () => {
   loadSettings();
   applyUIStyle(settings.uiStyle || 'default', false);
-  applyColor('u1', settings.u1Color || 'cyan', false);
-  applyColor('u2', settings.u2Color || 'magenta', false);
+  applyColorHex('u1', settings.u1Hex || '#00ffc8', false);
+  applyColorHex('u2', settings.u2Hex || '#ff00cc', false);
   const saved = localStorage.getItem('epoch_me');
   if (saved && USERS.includes(saved)) {
     document.getElementById('loginScreen').style.display = 'none';
@@ -534,25 +526,17 @@ window.logout = function() {
 };
 
 // ── THEMES ──
-const COLOR_HEX = { cyan:'#00ffc8', magenta:'#ff00cc', blue:'#88c0ff', amber:'#ffaa00', white:'#c8c8c8', purple:'#7b5cf0', green:'#39ff14', red:'#ff4444' };
+const COLOR_HEX = {}; // kept for compat
 
 function hexToRgbArr(hex) {
-  return [parseInt(hex.slice(1,3),16), parseInt(hex.slice(3,5),16), parseInt(hex.slice(5,7),16)];
+  const h = hex.replace('#','');
+  return [parseInt(h.slice(0,2),16), parseInt(h.slice(2,4),16), parseInt(h.slice(4,6),16)];
 }
 
-function applyUIStyle(styleId, save=true) {
-  UI_STYLES.forEach(s => document.body.classList.remove('ui-'+s.id));
-  document.body.classList.add('ui-'+styleId);
-  settings.uiStyle = styleId;
-  if (save) { saveSettings(); buildStyleGrid(); buildColorGrids(); }
-}
-
-function applyColor(col, colorId, save=true) {
-  if (col === 'u1') settings.u1Color = colorId;
-  else settings.u2Color = colorId;
-  const hex = COLOR_HEX[colorId] || '#00ffc8';
+function applyColorHex(col, hex, save=true) {
+  if (col === 'u1') { settings.u1Hex = hex; wheelState.u1 = hex; }
+  else { settings.u2Hex = hex; wheelState.u2 = hex; }
   const [r,g,b] = hexToRgbArr(hex);
-  // inject CSS vars directly on :root
   const varPfx = '--'+col;
   document.documentElement.style.setProperty(varPfx+'-acc', hex);
   document.documentElement.style.setProperty(varPfx+'-acc2', `rgba(${r},${g},${b},0.09)`);
@@ -560,9 +544,23 @@ function applyColor(col, colorId, save=true) {
   document.documentElement.style.setProperty(varPfx+'-brd', `rgba(${r},${g},${b},0.12)`);
   document.documentElement.style.setProperty(varPfx+'-brd2', `rgba(${r},${g},${b},0.28)`);
   document.documentElement.style.setProperty(varPfx+'-glow', `0 0 18px rgba(${r},${g},${b},0.28),0 0 55px rgba(${r},${g},${b},0.09)`);
-  if (save) { saveSettings(); buildColorGrids(); }
+  document.documentElement.style.setProperty(varPfx+'-bg', `rgba(${r},${g},${b},0.04)`);
+  document.documentElement.style.setProperty(varPfx+'-bg2', `rgba(${r},${g},${b},0.07)`);
+  if (save) { saveSettings(); updateWheelUI(col, hex); }
 }
-window.applyThemeW = (col, id) => applyColor(col, id); // legacy compat
+
+// Legacy compat
+function applyColor(col, colorId, save=true) {}
+window.applyThemeW = (col, id) => {};
+
+function applyUIStyle(styleId, save=true) {
+  UI_STYLES.forEach(s => document.body.classList.remove('ui-'+s.id));
+  document.body.classList.add('ui-'+styleId);
+  settings.uiStyle = styleId;
+  if (save) { saveSettings(); buildStyleGrid(); }
+}
+
+function buildTGrids() { buildStyleGrid(); buildWheels(); }
 
 function buildStyleGrid() {
   const g = document.getElementById('uiStyleGrid');
@@ -577,31 +575,149 @@ function buildStyleGrid() {
   });
 }
 
-function buildColorGrids() {
-  buildColorGrid('u1', 'cgrid-u1', settings.u1Color);
-  buildColorGrid('u2', 'cgrid-u2', settings.u2Color);
-  const l1 = document.getElementById('colorLbl1');
-  const l2 = document.getElementById('colorLbl2');
-  if (l1) l1.textContent = (ME || 'your') + ' side';
-  if (l1) l1.textContent = 'Monish';
-  if (l2) l2.textContent = 'Prashanth';
+function buildWheels() {
+  buildWheel('wc-u1', 'u1', settings.u1Hex || '#00ffc8', 'Monish');
+  buildWheel('wc-u2', 'u2', settings.u2Hex || '#ff00cc', 'Prashanth');
 }
 
-function buildColorGrid(col, elId, sel) {
-  const g = document.getElementById(elId);
-  if (!g) return;
-  g.innerHTML = '';
-  COLORS.forEach(c => {
-    const b = document.createElement('div');
-    b.className = 'cbtn' + (c.id === sel ? ' sel' : '');
-    b.style.setProperty('--cdot', c.dot);
-    b.title = c.label;
-    b.onclick = () => applyColor(col, c.id);
-    g.appendChild(b);
+function buildWheel(containerId, col, currentHex, name) {
+  const wrap = document.getElementById(containerId);
+  if (!wrap) return;
+  wrap.innerHTML = '';
+
+  const SIZE = 160;
+  const CX = SIZE/2, CY = SIZE/2, R = SIZE/2 - 4;
+
+  // Canvas wheel
+  const canvas = document.createElement('canvas');
+  canvas.width = SIZE; canvas.height = SIZE;
+  canvas.className = 'wheel-canvas';
+  canvas.title = 'click to pick color';
+  drawWheel(canvas, currentHex, CX, CY, R);
+
+  canvas.addEventListener('click', e => {
+    const rect = canvas.getBoundingClientRect();
+    const x = (e.clientX - rect.left) * (SIZE / rect.width) - CX;
+    const y = (e.clientY - rect.top) * (SIZE / rect.height) - CY;
+    const dist = Math.sqrt(x*x + y*y);
+    if (dist > R + 2) return;
+    let h = Math.atan2(y, x) * 180 / Math.PI + 180;
+    const s = Math.min(dist / R, 1);
+    // inner dark circle = black/dark shortcut
+    if (dist < R * 0.15) { applyColorHex(col, '#0a0a0a'); drawWheel(canvas, '#0a0a0a', CX, CY, R); return; }
+    const hex = hslToHex(h, s * 100, 55);
+    applyColorHex(col, hex);
+    drawWheel(canvas, hex, CX, CY, R);
   });
+
+  // Brightness slider below
+  const sliderWrap = document.createElement('div');
+  sliderWrap.className = 'wheel-slider-wrap';
+  const slider = document.createElement('input');
+  slider.type = 'range'; slider.min = 20; slider.max = 90; slider.value = 55;
+  slider.className = 'wheel-slider';
+  slider.style.setProperty('--thumb-col', currentHex);
+  slider.title = 'brightness';
+  slider.addEventListener('input', () => {
+    const hex = wheelState[col];
+    const hsl = hexToHsl(hex);
+    const newHex = hslToHex(hsl.h, hsl.s, parseInt(slider.value));
+    applyColorHex(col, newHex);
+    slider.style.setProperty('--thumb-col', newHex);
+    drawWheel(canvas, newHex, CX, CY, R);
+  });
+  sliderWrap.appendChild(slider);
+
+  // Hex input
+  const hexRow = document.createElement('div');
+  hexRow.className = 'wheel-hex-row';
+  const hexSwatch = document.createElement('div');
+  hexSwatch.className = 'wheel-hex-swatch';
+  hexSwatch.style.background = currentHex;
+  hexSwatch.id = 'swatch-'+col;
+  const hexInp = document.createElement('input');
+  hexInp.className = 'wheel-hex-inp';
+  hexInp.value = currentHex;
+  hexInp.id = 'hexinp-'+col;
+  hexInp.maxLength = 7;
+  hexInp.addEventListener('change', () => {
+    let v = hexInp.value.trim();
+    if (!v.startsWith('#')) v = '#' + v;
+    if (/^#[0-9a-fA-F]{6}$/.test(v)) {
+      applyColorHex(col, v);
+      drawWheel(canvas, v, CX, CY, R);
+    }
+  });
+  hexRow.appendChild(hexSwatch); hexRow.appendChild(hexInp);
+
+  wrap.appendChild(canvas);
+  wrap.appendChild(sliderWrap);
+  wrap.appendChild(hexRow);
 }
 
-function buildTGrids() { buildStyleGrid(); buildColorGrids(); } // keep compat call
+function updateWheelUI(col, hex) {
+  const sw = document.getElementById('swatch-'+col); if(sw) sw.style.background = hex;
+  const inp = document.getElementById('hexinp-'+col); if(inp) inp.value = hex;
+  const sl = document.querySelector(`#wc-${col} .wheel-slider`);
+  if (sl) { sl.style.setProperty('--thumb-col', hex); }
+}
+
+function drawWheel(canvas, selectedHex, CX, CY, R) {
+  const ctx = canvas.getContext('2d');
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  // Draw hue/saturation ring
+  for (let angle = 0; angle < 360; angle += 1) {
+    for (let r = R * 0.15; r <= R; r += 1) {
+      const s = (r / R) * 100;
+      const x = CX + r * Math.cos((angle - 180) * Math.PI / 180);
+      const y = CY + r * Math.sin((angle - 180) * Math.PI / 180);
+      ctx.fillStyle = `hsl(${angle},${s}%,55%)`;
+      ctx.fillRect(x, y, 1.5, 1.5);
+    }
+  }
+  // Center black dot
+  const cg = ctx.createRadialGradient(CX, CY, 0, CX, CY, R * 0.15);
+  cg.addColorStop(0, '#000'); cg.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.fillStyle = cg;
+  ctx.beginPath(); ctx.arc(CX, CY, R * 0.15, 0, Math.PI * 2); ctx.fill();
+  // Indicator dot
+  const hsl = hexToHsl(selectedHex);
+  const ir = (hsl.s / 100) * R;
+  const ia = (hsl.h - 180) * Math.PI / 180;
+  const ix = CX + ir * Math.cos(ia);
+  const iy = CY + ir * Math.sin(ia);
+  ctx.beginPath(); ctx.arc(ix, iy, 7, 0, Math.PI * 2);
+  ctx.strokeStyle = '#fff'; ctx.lineWidth = 2; ctx.stroke();
+  ctx.beginPath(); ctx.arc(ix, iy, 5, 0, Math.PI * 2);
+  ctx.fillStyle = selectedHex; ctx.fill();
+  // Outer ring border
+  ctx.beginPath(); ctx.arc(CX, CY, R, 0, Math.PI * 2);
+  ctx.strokeStyle = 'rgba(255,255,255,0.08)'; ctx.lineWidth = 1; ctx.stroke();
+}
+
+// Color math helpers
+function hslToHex(h, s, l) {
+  s /= 100; l /= 100;
+  const a = s * Math.min(l, 1 - l);
+  const f = n => { const k = (n + h/30) % 12; const c = l - a * Math.max(Math.min(k-3, 9-k, 1), -1); return Math.round(255*c).toString(16).padStart(2,'0'); };
+  return '#' + f(0) + f(8) + f(4);
+}
+function hexToHsl(hex) {
+  let [r,g,b] = hexToRgbArr(hex).map(v => v/255);
+  const max = Math.max(r,g,b), min = Math.min(r,g,b);
+  let h, s, l = (max+min)/2;
+  if (max === min) { h = s = 0; }
+  else {
+    const d = max - min; s = l > 0.5 ? d/(2-max-min) : d/(max+min);
+    if (max===r) h = ((g-b)/d + (g<b?6:0))/6;
+    else if (max===g) h = ((b-r)/d + 2)/6;
+    else h = ((r-g)/d + 4)/6;
+  }
+  return { h: h*360, s: s*100, l: l*100 };
+}
+
+function buildColorGrids() { buildWheels(); }
+function buildColorGrid() {}
 
 // ── SEARCH ──
 let searchFilter = 'both';
@@ -1018,17 +1134,95 @@ window.saveDriveUrl = function() {
   showToast('drive url saved ✓');
 };
 
+// ── DRIVE UPLOAD PROGRESS POPUP ──
+function showDriveProgress(msg, pct) {
+  let pop = document.getElementById('drivePop');
+  if (!pop) {
+    pop = document.createElement('div');
+    pop.id = 'drivePop';
+    pop.className = 'drive-pop';
+    document.body.appendChild(pop);
+  }
+  pop.innerHTML = `
+    <div class="drive-pop-icon">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
+    </div>
+    <div class="drive-pop-body">
+      <div class="drive-pop-msg">${msg}</div>
+      ${pct !== undefined ? `<div class="drive-pop-bar"><div class="drive-pop-fill" style="width:${pct}%"></div></div>` : ''}
+    </div>`;
+  pop.classList.add('show');
+}
+
+function hideDriveProgress(success, msg) {
+  const pop = document.getElementById('drivePop');
+  if (!pop) return;
+  pop.innerHTML = `
+    <div class="drive-pop-icon" style="color:${success?'var(--u1-acc)':'#ff5555'}">
+      ${success ? '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>'
+                : '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>'}
+    </div>
+    <div class="drive-pop-body"><div class="drive-pop-msg">${msg}</div></div>`;
+  setTimeout(() => { pop.classList.remove('show'); }, 2800);
+}
+
 async function uploadToDrive(base64img, filename) {
   if (!settings.driveUrl || !base64img) return;
+  showDriveProgress('uploading to google drive...', 30);
   try {
-    await fetch(settings.driveUrl, {
+    const blob = base64ToBlob(base64img);
+    const fd = new FormData();
+    fd.append('file', blob, filename);
+    fd.append('filename', filename);
+
+    // Simulate progress during fetch (no real XHR progress with fetch)
+    let prog = 30;
+    const progTimer = setInterval(() => {
+      prog = Math.min(prog + 12, 88);
+      showDriveProgress('uploading to google drive...', prog);
+    }, 400);
+
+    const res = await fetch(settings.driveUrl, {
       method: 'POST',
-      mode: 'no-cors',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ filename, data: base64img.split(',')[1], mime: 'image/jpeg' })
+      body: fd,
+      // No Content-Type header — FormData sets it automatically with boundary
     });
-  } catch(e) {}
+
+    clearInterval(progTimer);
+
+    if (res.ok) {
+      const txt = await res.text();
+      hideDriveProgress(true, '✓ saved to google drive');
+    } else {
+      hideDriveProgress(false, 'drive upload failed — check url');
+    }
+  } catch(e) {
+    hideDriveProgress(false, 'drive upload error: ' + e.message);
+  }
 }
+
+function base64ToBlob(base64) {
+  const parts = base64.split(',');
+  const mime = parts[0].match(/:(.*?);/)[1];
+  const raw = atob(parts[1]);
+  const arr = new Uint8Array(raw.length);
+  for (let i = 0; i < raw.length; i++) arr[i] = raw.charCodeAt(i);
+  return new Blob([arr], { type: mime });
+}
+
+window.testDriveUpload = async function() {
+  if (!settings.driveUrl) { showToast('save drive url first'); return; }
+  // Create a tiny test image
+  const c = document.createElement('canvas'); c.width = 200; c.height = 80;
+  const ctx = c.getContext('2d');
+  ctx.fillStyle = '#030508'; ctx.fillRect(0,0,200,80);
+  ctx.fillStyle = '#00ffc8'; ctx.font = 'bold 14px monospace';
+  ctx.fillText('ZENITH-FORGE', 20, 30);
+  ctx.fillStyle = 'rgba(255,255,255,0.5)'; ctx.font = '10px monospace';
+  ctx.fillText('drive test — ' + new Date().toLocaleTimeString(), 20, 55);
+  const testImg = c.toDataURL('image/jpeg', 0.8);
+  await uploadToDrive(testImg, 'zenith_drive_test.jpg');
+};
 
 // ── TOAST ──
 function showToast(msg) {
@@ -1482,11 +1676,37 @@ body.ui-glass .taskbar,body.u1-glass .taskbar,body.u2-glass .taskbar{background:
 .ui-style-sub{font-family:'Space Mono',monospace;font-size:8px;color:rgba(255,255,255,0.4);margin-top:2px}
 /* color split */
 .color-split{display:grid;grid-template-columns:1fr 1fr;gap:12px}
-.color-col-lbl{font-family:'Space Mono',monospace;font-size:8px;letter-spacing:0.1em;color:rgba(255,255,255,0.5);margin-bottom:8px;text-transform:uppercase}
-.cgrid{display:flex;flex-wrap:wrap;gap:6px}
-.cbtn{width:28px;height:28px;border-radius:50%;cursor:pointer;border:2px solid transparent;transition:all 0.18s;box-shadow:0 0 0 0 currentColor}
-.cbtn:hover{transform:scale(1.18)}
-.cbtn.sel{border-color:#fff;outline:2px solid rgba(255,255,255,0.2);outline-offset:2px}
+/* ── COLOR WHEELS ── */
+.wheel-wrap{display:flex;flex-direction:column;align-items:center;gap:8px;padding:10px 0}
+.wheel-canvas{border-radius:50%;cursor:crosshair;display:block;box-shadow:0 0 24px rgba(0,0,0,0.6),0 0 1px rgba(255,255,255,0.08);transition:box-shadow 0.2s}
+.wheel-canvas:hover{box-shadow:0 0 32px rgba(0,0,0,0.8),0 0 8px var(--u1-acc)}
+.wheel-slider-wrap{width:160px}
+.wheel-slider{-webkit-appearance:none;appearance:none;width:100%;height:4px;border-radius:2px;background:linear-gradient(to right,#000,var(--thumb-col,#fff));outline:none;cursor:pointer}
+.wheel-slider::-webkit-slider-thumb{-webkit-appearance:none;width:14px;height:14px;border-radius:50%;background:var(--thumb-col,#fff);border:2px solid rgba(255,255,255,0.4);box-shadow:0 0 6px var(--thumb-col,#fff);cursor:pointer}
+.wheel-hex-row{display:flex;align-items:center;gap:6px;width:160px}
+.wheel-hex-swatch{width:22px;height:22px;border-radius:4px;flex-shrink:0;border:1px solid rgba(255,255,255,0.15)}
+.wheel-hex-inp{flex:1;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.12);color:rgba(255,255,255,0.8);font-family:'Space Mono',monospace;font-size:10px;padding:4px 8px;border-radius:2px;outline:none;letter-spacing:0.05em}
+.wheel-hex-inp:focus{border-color:rgba(255,255,255,0.3)}
+.color-split{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.color-col{display:flex;flex-direction:column;align-items:center}
+.color-col-lbl{font-family:'Space Mono',monospace;font-size:8px;letter-spacing:0.1em;color:rgba(255,255,255,0.5);margin-bottom:4px;text-transform:uppercase;text-align:center}
+
+/* ── DRIVE SETUP STEPS ── */
+.drive-steps{display:flex;flex-direction:column;gap:6px;margin-bottom:10px}
+.drive-step{font-family:'Space Mono',monospace;font-size:8px;color:rgba(255,255,255,0.55);display:flex;align-items:flex-start;gap:8px;line-height:1.5}
+.drive-step-n{background:var(--u1-acc2);border:1px solid var(--u1-brd2);color:var(--u1-acc);font-size:8px;font-weight:700;width:16px;height:16px;border-radius:50%;display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-top:1px}
+.drive-link{color:var(--u1-acc);text-decoration:none;border-bottom:1px solid var(--u1-brd2)}
+.drive-link:hover{opacity:0.8}
+.drive-code-wrap{background:rgba(0,0,0,0.4);border:1px solid rgba(255,255,255,0.08);border-radius:4px;padding:10px;margin-top:4px}
+.drive-code-lbl{font-family:'Space Mono',monospace;font-size:7px;color:rgba(255,255,255,0.3);letter-spacing:0.12em;text-transform:uppercase;margin-bottom:6px}
+.drive-code{font-family:'Courier New',monospace;font-size:8px;color:rgba(100,255,180,0.75);white-space:pre;overflow-x:auto;line-height:1.7;max-height:140px;overflow-y:auto}
+.drive-pop{position:fixed;bottom:24px;right:24px;z-index:9000;display:flex;align-items:center;gap:10px;background:rgba(6,10,22,0.97);border:1px solid var(--u1-brd2);border-radius:6px;padding:12px 16px;min-width:220px;max-width:300px;box-shadow:0 4px 30px rgba(0,0,0,0.7),0 0 20px var(--u1-accl);transform:translateY(80px);opacity:0;transition:all 0.35s cubic-bezier(0.16,1,0.3,1);pointer-events:none}
+.drive-pop.show{transform:translateY(0);opacity:1}
+.drive-pop-icon{color:var(--u1-acc);flex-shrink:0}
+.drive-pop-body{flex:1;min-width:0}
+.drive-pop-msg{font-family:'Space Mono',monospace;font-size:9px;color:rgba(255,255,255,0.8);letter-spacing:0.06em;margin-bottom:6px}
+.drive-pop-bar{height:3px;background:rgba(255,255,255,0.08);border-radius:2px;overflow:hidden}
+.drive-pop-fill{height:100%;background:var(--u1-acc);border-radius:2px;transition:width 0.4s ease;box-shadow:0 0 8px var(--u1-accl)}
 .tdot{width:9px;height:9px;border-radius:50%;flex-shrink:0}
 
 /* ── HEATMAP ── */
@@ -1637,15 +1857,15 @@ body.ui-glass .taskbar,body.u1-glass .taskbar,body.u2-glass .taskbar{background:
       <!-- COLORS -->
       <div class="ssec">
         <div class="slbl">colors</div>
-        <div class="ssubl">accent color for each side — independent of ui style</div>
+        <div class="ssubl">drag on wheel · type hex · adjust brightness</div>
         <div class="color-split">
           <div class="color-col">
-            <div class="color-col-lbl" id="colorLbl1">monish</div>
-            <div class="cgrid" id="cgrid-u1"></div>
+            <div class="color-col-lbl">Monish</div>
+            <div class="wheel-wrap" id="wc-u1"></div>
           </div>
           <div class="color-col">
-            <div class="color-col-lbl" id="colorLbl2">prashanth</div>
-            <div class="cgrid" id="cgrid-u2"></div>
+            <div class="color-col-lbl">Prashanth</div>
+            <div class="wheel-wrap" id="wc-u2"></div>
           </div>
         </div>
       </div>
@@ -1677,11 +1897,45 @@ body.ui-glass .taskbar,body.u1-glass .taskbar,body.u2-glass .taskbar{background:
       <!-- GOOGLE DRIVE -->
       <div class="ssec">
         <div class="slbl">google drive backup</div>
-        <div class="srow">
-          <input class="sinp" id="driveUrlInp" placeholder="paste apps script web app url" style="margin:0;flex:1">
+        <div class="ssubl" style="margin-bottom:10px">images auto-upload to your drive on every post</div>
+
+        <!-- HOW TO GET URL -->
+        <div class="drive-steps">
+          <div class="drive-step"><span class="drive-step-n">1</span>Open <a href="https://script.google.com" target="_blank" class="drive-link">script.google.com</a> → New project</div>
+          <div class="drive-step"><span class="drive-step-n">2</span>Paste the code below → Save</div>
+          <div class="drive-step"><span class="drive-step-n">3</span>Deploy → New deployment → Web app → Execute as: Me → Anyone can access → Deploy</div>
+          <div class="drive-step"><span class="drive-step-n">4</span>Copy the Web App URL → paste below</div>
+        </div>
+
+        <div class="drive-code-wrap">
+          <div class="drive-code-lbl">paste this into Apps Script:</div>
+          <pre class="drive-code" id="driveCodePre">function doPost(e) {
+  var data = e.parameter;
+  var fname = data.filename || ('upload_' + Date.now() + '.jpg');
+  var blob = e.parameters.file
+    ? Utilities.newBlob(
+        Utilities.base64Decode(e.parameters.file[0]),
+        'image/jpeg', fname)
+    : null;
+  if (!blob && e.postData && e.postData.contents) {
+    // FormData fallback
+    blob = e.postData.blob || null;
+  }
+  if (blob) {
+    DriveApp.getRootFolder().createFile(blob.setName(fname));
+  }
+  return ContentService
+    .createTextOutput(JSON.stringify({ok:true}))
+    .setMimeType(ContentService.MimeType.JSON);
+}</pre>
+          <button class="sbtn" style="margin-top:6px;width:100%" onclick="navigator.clipboard.writeText(document.getElementById('driveCodePre').textContent).then(()=>showToast('code copied ✓'))">copy code</button>
+        </div>
+
+        <div class="srow" style="margin-top:12px">
+          <input class="sinp" id="driveUrlInp" placeholder="https://script.google.com/macros/s/.../exec" style="margin:0;flex:1">
           <button class="sbtn" onclick="saveDriveUrl()">save</button>
         </div>
-        <div class="sinp-hint">images auto-upload to drive on every post</div>
+        <button class="sbtn" style="margin-top:8px;width:100%" onclick="testDriveUpload()">📤 send test image to drive</button>
       </div>
 
       <!-- HIDDEN EGG -->
