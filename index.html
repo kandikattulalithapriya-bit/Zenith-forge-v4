@@ -91,12 +91,19 @@ function loadSettings() { try { const d = localStorage.getItem('epoch_settings')
 
 // ── BOOT ──
 window.bootAs = function(name) {
-  ME = name;
-  localStorage.setItem('epoch_me', name);
-  document.getElementById('loginScreen').style.display = 'none';
-  document.getElementById('mainApp').style.display = 'flex';
-  initUI();
-  listenFirebase();
+  try {
+    ME = name;
+    localStorage.setItem('epoch_me', name);
+    document.getElementById('loginScreen').style.display = 'none';
+    document.getElementById('mainApp').style.display = 'flex';
+    initUI();
+    listenFirebase();
+  } catch(e) {
+    console.error('bootAs error:', e);
+    // Force hide login screen even if something errored
+    document.getElementById('loginScreen').style.display = 'none';
+    document.getElementById('mainApp').style.display = 'flex';
+  }
 };
 
 window.addEventListener('DOMContentLoaded', () => {
@@ -106,14 +113,14 @@ window.addEventListener('DOMContentLoaded', () => {
   applyColorHex('u1', settings.u1Hex || '#00ffc8', false);
   applyColorHex('u2', settings.u2Hex || '#ff00cc', false);
   // Close comment popup on outside click
-  document.addEventListener('click', (e) => {
+  document.addEventListener('mousedown', (e) => {
     const panel = document.getElementById('cmtPanel');
     if (panel && panel.classList.contains('open')) {
       if (!panel.contains(e.target) && !e.target.closest('.cmt-btn')) {
         closeComments();
       }
     }
-  }, true);
+  });
   const saved = localStorage.getItem('epoch_me');
   if (saved && USERS.includes(saved)) {
     document.getElementById('loginScreen').style.display = 'none';
