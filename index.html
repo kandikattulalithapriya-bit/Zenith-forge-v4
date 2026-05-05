@@ -25,7 +25,7 @@ const db = getDatabase(app);
 
 const USERS = ['Monish','Prashanth'];
 let ME = '';
-const EMOJIS = ['🔥','💀','⚡','🫡','👁️','🏆','📈','💪','🧠','⚔️','🎯','🛡️','🌙','☀️','🌊','🏋️','💯','🚀','⭐','🦾','📊','🥷','🔮','🌑','🎖️','💎','🩸','🫀','🌪️','🕹️'];
+const EMOJIS = ['🔥','💀','⚡','🫡','👁️','🏆','🚀','📈','📊','🧠','💻','🎯','👑','⚔️','⏳','💡','📌','🌀'];
 const QUOTES = [
   // Bhagavad Gita
   "You have a right to perform your prescribed duties, but you are not entitled to the fruits of your actions. — Bhagavad Gita 2.47",
@@ -75,6 +75,7 @@ const UI_STYLES = [
 let wheelState = { u1: '#00ffc8', u2: '#ff00cc' };
 
 const APP_VERSION = 'v26';
+if (localStorage.getItem('app_version') !== APP_VERSION) { localStorage.setItem('app_version', APP_VERSION); alert('App updated 🚀'); }
 let imgData = null;
 let allPosts = { Monish: {}, Prashanth: {} };
 let streaks = { Monish: 0, Prashanth: 0 };
@@ -130,7 +131,7 @@ function initUI() {
   // friend column
   document.getElementById('av2').textContent = fr[0];
   document.getElementById('un2').textContent = fr;
-  // heatmap names
+  // stats names
   const h1 = document.getElementById('hmapName1'); if(h1) h1.textContent = ME.toUpperCase() + ' — CONSISTENCY';
   const h2 = document.getElementById('hmapName2'); if(h2) h2.textContent = fr.toUpperCase() + ' — CONSISTENCY';
   // logout btn
@@ -152,7 +153,7 @@ function listenFirebase() {
     allPosts = { Monish: data.Monish || {}, Prashanth: data.Prashanth || {} };
     renderFeed();
     renderTimeline();
-    const tab = document.getElementById('heatmapView');
+    const tab = document.getElementById('statsView');
     if (tab && tab.style.display !== 'none') {
       buildHmap('Monish', hmapRange.Monish);
       buildHmap('Prashanth', hmapRange.Prashanth);
@@ -506,227 +507,9 @@ window.makePost = async function() {
   }
 };
 
-// ── HOME / IRON MAN UI ──
-let sessionActive = false;
-let sessionStart = null;
-let sessionTimer = null;
-let sessionLog = [];
-
-function renderHome() {
-  const myPosts = Object.values(allPosts[ME] || {});
-  const frPosts = Object.values(allPosts[FRIEND()] || {});
-  const myStreak = streaks[ME] || 0;
-  const frStreak = streaks[FRIEND()] || 0;
-  const myMax = myPosts.length ? Math.max(...myPosts.map(p=>p.day||0)) : 0;
-  const myWeek = myPosts.filter(p => {
-    const d = new Date(p.ts); const now = new Date();
-    return (now - d) < 7*24*3600*1000;
-  }).length;
-  const frWeek = frPosts.filter(p => {
-    const d = new Date(p.ts); const now = new Date();
-    return (now - d) < 7*24*3600*1000;
-  }).length;
-
-  // load session log from localStorage
-  try { sessionLog = JSON.parse(localStorage.getItem('epoch_sessions_'+ME) || '[]'); } catch(e){ sessionLog=[]; }
-
-  const totalSessionMins = sessionLog.reduce((a,s)=>a+(s.dur||0),0);
-  const todayStr = new Date().toISOString().slice(0,10);
-  const todaySessions = sessionLog.filter(s=>s.date===todayStr);
-  const todayMins = todaySessions.reduce((a,s)=>a+(s.dur||0),0);
-
-  const acc = (settings.u1Hex && ME==='Monish') ? settings.u1Hex : (settings.u2Hex||'#ff00cc');
-
-  document.getElementById('homeContent').innerHTML = `
-<div class="hm-root">
-  <!-- HUD top bar -->
-  <div class="hm-hud-bar">
-    <div class="hm-hud-cell">
-      <div class="hm-hud-label">OPERATOR</div>
-      <div class="hm-hud-val" style="color:${acc}">${ME.toUpperCase()}</div>
-    </div>
-    <div class="hm-hud-cell">
-      <div class="hm-hud-label">DAY</div>
-      <div class="hm-hud-val" style="color:${acc}">${myMax}</div>
-    </div>
-    <div class="hm-hud-cell">
-      <div class="hm-hud-label">STREAK</div>
-      <div class="hm-hud-val" style="color:${acc}">${myStreak}🔥</div>
-    </div>
-    <div class="hm-hud-cell">
-      <div class="hm-hud-label">7D POSTS</div>
-      <div class="hm-hud-val" style="color:${acc}">${myWeek}</div>
-    </div>
-    <div class="hm-hud-cell">
-      <div class="hm-hud-label">SESSION TIME TODAY</div>
-      <div class="hm-hud-val" style="color:${acc}">${todayMins}m</div>
-    </div>
-  </div>
-
-  <!-- SESSION RECORDER -->
-  <div class="hm-session-block" id="hmSessionBlock">
-    <div class="hm-session-title">SESSION RECORDER</div>
-    <div class="hm-session-status" id="hmSessionStatus">${sessionActive ? '● RECORDING' : '○ STANDBY'}</div>
-    <div class="hm-session-timer" id="hmSessionTimer">${sessionActive ? fmtElapsed() : '00:00:00'}</div>
-    <div class="hm-session-note-row">
-      <input id="hmSessionNote" placeholder="what are you working on..." class="hm-session-input" value="${sessionActive ? (window._sessionNote||'') : ''}">
-    </div>
-    <div style="display:flex;gap:8px;justify-content:center;margin-top:10px">
-      ${sessionActive
-        ? `<button class="hm-btn hm-btn-stop" onclick="endSession()">■ END SESSION</button>`
-        : `<button class="hm-btn hm-btn-start" onclick="startSession()">▶ START SESSION</button>`
-      }
-    </div>
-  </div>
-
-  <!-- TODAY'S SESSIONS LOG -->
-  <div class="hm-section-title">TODAY'S SESSIONS</div>
-  <div class="hm-sessions-log">
-    ${todaySessions.length ? todaySessions.map(s=>`
-      <div class="hm-session-entry">
-        <span class="hm-se-time">${s.startTime}</span>
-        <span class="hm-se-note">${s.note||'—'}</span>
-        <span class="hm-se-dur">${s.dur}m</span>
-      </div>
-    `).join('') : '<div class="hm-empty">no sessions recorded today</div>'}
-  </div>
-
-  <!-- GRAPHS SECTION -->
-  <div class="hm-section-title">ACTIVITY GRAPH</div>
-  <div class="hm-graph-row">
-    <div class="hm-graph-panel">
-      <div class="hm-graph-label">${ME} — posts per week</div>
-      <canvas id="hmGraph1" width="300" height="80"></canvas>
-    </div>
-    <div class="hm-graph-panel">
-      <div class="hm-graph-label">${FRIEND()} — posts per week</div>
-      <canvas id="hmGraph2" width="300" height="80"></canvas>
-    </div>
-  </div>
-
-  <!-- VS PANEL -->
-  <div class="hm-vs-row">
-    <div class="hm-vs-card" style="border-color:${settings.u1Hex||'#00ffc8'}22">
-      <div class="hm-vs-name" style="color:${settings.u1Hex||'#00ffc8'}">MONISH</div>
-      <div class="hm-vs-stat">${(allPosts['Monish']?Object.keys(allPosts['Monish']).length:0)} posts · ${streaks['Monish']||0}🔥</div>
-      <div class="hm-vs-week">${(()=>{const p=Object.values(allPosts['Monish']||{});return p.filter(x=>(Date.now()-x.ts)<604800000).length})()}  this week</div>
-    </div>
-    <div class="hm-vs-mid">VS</div>
-    <div class="hm-vs-card" style="border-color:${settings.u2Hex||'#ff00cc'}22">
-      <div class="hm-vs-name" style="color:${settings.u2Hex||'#ff00cc'}">PRASHANTH</div>
-      <div class="hm-vs-stat">${(allPosts['Prashanth']?Object.keys(allPosts['Prashanth']).length:0)} posts · ${streaks['Prashanth']||0}🔥</div>
-      <div class="hm-vs-week">${(()=>{const p=Object.values(allPosts['Prashanth']||{});return p.filter(x=>(Date.now()-x.ts)<604800000).length})()} this week</div>
-    </div>
-  </div>
-</div>`;
-
-  drawHomeGraph('hmGraph1','Monish', settings.u1Hex||'#00ffc8');
-  drawHomeGraph('hmGraph2','Prashanth', settings.u2Hex||'#ff00cc');
-  if (sessionActive) startSessionTick();
-}
-
-function fmtElapsed() {
-  if (!sessionStart) return '00:00:00';
-  const s = Math.floor((Date.now()-sessionStart)/1000);
-  const h = String(Math.floor(s/3600)).padStart(2,'0');
-  const m = String(Math.floor((s%3600)/60)).padStart(2,'0');
-  const sc = String(s%60).padStart(2,'0');
-  return `${h}:${m}:${sc}`;
-}
-
-function startSessionTick() {
-  clearInterval(sessionTimer);
-  sessionTimer = setInterval(()=>{
-    const el = document.getElementById('hmSessionTimer');
-    if (el) el.textContent = fmtElapsed();
-    else clearInterval(sessionTimer);
-  }, 1000);
-}
-
-window.startSession = function() {
-  sessionActive = true;
-  sessionStart = Date.now();
-  window._sessionNote = document.getElementById('hmSessionNote')?.value || '';
-  startSessionTick();
-  renderHome();
-};
-
-window.endSession = function() {
-  if (!sessionStart) return;
-  const dur = Math.max(1, Math.round((Date.now()-sessionStart)/60000));
-  const note = document.getElementById('hmSessionNote')?.value || window._sessionNote || '';
-  const entry = {
-    date: new Date().toISOString().slice(0,10),
-    startTime: new Date(sessionStart).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}),
-    dur, note
-  };
-  sessionLog.push(entry);
-  try { localStorage.setItem('epoch_sessions_'+ME, JSON.stringify(sessionLog)); } catch(e){}
-  clearInterval(sessionTimer);
-  sessionActive = false;
-  sessionStart = null;
-  window._sessionNote = '';
-  showToast(`session saved — ${dur} min`);
-  renderHome();
-};
-
-function drawHomeGraph(canvasId, user, color) {
-  const canvas = document.getElementById(canvasId);
-  if (!canvas) return;
-  const ctx = canvas.getContext('2d');
-  const W = canvas.offsetWidth || 300;
-  const H = canvas.offsetHeight || 80;
-  canvas.width = W; canvas.height = H;
-  ctx.clearRect(0,0,W,H);
-
-  // Build 8 weeks of data
-  const posts = Object.values(allPosts[user] || {});
-  const weeks = [];
-  for (let i=7;i>=0;i--) {
-    const wStart = Date.now() - (i+1)*7*86400000;
-    const wEnd = Date.now() - i*7*86400000;
-    weeks.push(posts.filter(p=>p.ts>=wStart&&p.ts<wEnd).length);
-  }
-  const maxW = Math.max(...weeks,1);
-  const pad = 10;
-  const bw = (W - pad*2) / weeks.length;
-
-  ctx.strokeStyle = color + '33';
-  ctx.lineWidth = 1;
-  ctx.setLineDash([2,4]);
-  for (let i=0;i<=4;i++) {
-    const y = pad + (H-pad*2)*(1-i/4);
-    ctx.beginPath(); ctx.moveTo(pad,y); ctx.lineTo(W-pad,y); ctx.stroke();
-  }
-  ctx.setLineDash([]);
-
-  // Bar chart
-  weeks.forEach((v,i)=>{
-    const bh = ((H-pad*2)*v/maxW);
-    const x = pad + i*bw + bw*0.15;
-    const y = H-pad-bh;
-    const grad = ctx.createLinearGradient(0,y,0,H-pad);
-    grad.addColorStop(0, color);
-    grad.addColorStop(1, color+'22');
-    ctx.fillStyle = grad;
-    ctx.fillRect(x, y, bw*0.7, bh);
-    ctx.fillStyle = 'rgba(255,255,255,0.3)';
-    ctx.font = '7px Space Mono,monospace';
-    ctx.textAlign = 'center';
-    if(v>0) ctx.fillText(v, x+bw*0.35, y-3);
-  });
-
-  // Week labels
-  ctx.fillStyle = 'rgba(255,255,255,0.2)';
-  ctx.font = '6px Space Mono,monospace';
-  weeks.forEach((_,i)=>{
-    ctx.fillText(`w${8-7+i}`, pad+i*bw+bw*0.5, H-1);
-  });
-}
-
 // ── TABS ──
 window.goTab = function(tab) {
-  ['home','feed','timeline','heatmap','search','export'].forEach(t => {
+  ['home','feed','timeline','stats','search','export'].forEach(t => {
     const v = document.getElementById(t + 'View');
     if (v) v.style.display = 'none';
     const tb = document.getElementById('tb-' + t);
@@ -740,9 +523,8 @@ window.goTab = function(tab) {
   if (tb) tb.classList.add('on');
   const nt = document.getElementById('nt-' + tab);
   if (nt) nt.classList.add('on');
-  if (tab === 'home') renderHome();
   if (tab === 'timeline') renderTimeline();
-  if (tab === 'heatmap') {
+  if (tab === 'stats') {
     buildHmapControls(ME);
     buildHmapControls(FRIEND());
     buildHmap(ME, hmapRange[ME]);
@@ -1047,7 +829,22 @@ window.generatePDF = async function() {
   // open window FIRST synchronously to avoid popup blocker
   const w = window.open('', '_blank');
   if (!w) { showToast('allow popups for this site to export pdf'); return; }
-  w.document.write('<html><body style="background:#030508;color:#7b5cf0;font-family:monospace;padding:40px;text-align:center;letter-spacing:0.2em">GENERATING JOURNAL...</body></html>');
+  w.document.write('<html><body style="background:#030508;color:#7b5cf0;font-family:monospace;padding:40px;text-align:center;letter-spacing:0.2em">GENERATING JOURNAL...
+<div id="homeView" style="display:none; padding:20px;">
+  <h2>HOME 🧠</h2>
+  <button onclick="recordSession()">⏺ Record Session</button>
+  <canvas id="activityGraph" height="120"></canvas>
+</div>
+
+<script>
+function recordSession(){
+  const today = new Date().toDateString();
+  localStorage.setItem('session_'+today, Date.now());
+  alert('Session recorded 📈');
+}
+</script>
+
+</body></html>');
 
   btn.disabled = true;
   document.getElementById('expBtnTxt').textContent = '⏳ generating...';
@@ -1103,7 +900,22 @@ window.generatePDF = async function() {
   @media print{body{background:#030508!important;-webkit-print-color-adjust:exact;print-color-adjust:exact}}</style></head>
   <body><h1>${settings.appName}</h1>
   <div class="sub">progress journal · ${allEntries.length} entries · ${new Date().toLocaleDateString([],{day:'numeric',month:'long',year:'numeric'})}</div>
-  ${rows}</body></html>`;
+  ${rows}
+<div id="homeView" style="display:none; padding:20px;">
+  <h2>HOME 🧠</h2>
+  <button onclick="recordSession()">⏺ Record Session</button>
+  <canvas id="activityGraph" height="120"></canvas>
+</div>
+
+<script>
+function recordSession(){
+  const today = new Date().toDateString();
+  localStorage.setItem('session_'+today, Date.now());
+  alert('Session recorded 📈');
+}
+</script>
+
+</body></html>`;
 
   w.document.open();
   w.document.write(fullHtml);
@@ -1542,7 +1354,7 @@ window.sendInlineComment = async function(postKey, postUser) {
 };
 
 // ── GIPHY SETTINGS ──
-const GIPHY_KEY = 'B7OCuA0LKCGUyZuMtGeuLOpY8AuwcDCC';
+const GIPHY_KEY = 'B7OCuA0LKCGUyZuMtGeuLOpY8AuwcDCC'; // get free key at developers.giphy.com
 let giphyTarget = null; // {postKey, postUser} for which comment box the picker is for
 
 window.openGiphyPicker = function(postKey, postUser) {
@@ -1562,8 +1374,8 @@ window.closeGiphyPicker = function() {
 
 window.searchGiphy = async function() {
   const q = document.getElementById('giphySearch').value.trim();
-  if (!q) {
-    showToast('enter a search term'); return;
+  if (!q || GIPHY_KEY === 'PASTE_YOUR_GIPHY_KEY_HERE') {
+    showToast('add giphy api key in code first'); return;
   }
   const grid = document.getElementById('giphyGrid');
   grid.innerHTML = '<div class="giphy-loading">searching...</div>';
@@ -2273,42 +2085,6 @@ body.ui-glass .taskbar,body.u1-glass .taskbar,body.u2-glass .taskbar{background:
 /* ── TOAST ── */
 .toast{position:fixed;bottom:80px;right:16px;background:rgba(7,18,16,0.96);border:1px solid rgba(0,255,200,0.25);padding:10px 14px;font-family:'Space Mono',monospace;font-size:9px;color:rgba(0,255,200,0.85);z-index:400;max-width:220px;border-radius:2px;animation:fadeup 0.3s ease;box-shadow:0 0 16px rgba(0,255,200,0.08)}
 @keyframes fadeup{from{opacity:0;transform:translateY(7px)}to{opacity:1;transform:translateY(0)}}
-/* HOME / IRON MAN UI */
-.hm-root{padding:16px;display:flex;flex-direction:column;gap:14px;max-width:900px;margin:0 auto}
-.hm-hud-bar{display:flex;gap:0;border:1px solid rgba(0,255,200,0.15);background:rgba(0,255,200,0.03);border-radius:4px;overflow:hidden}
-.hm-hud-cell{flex:1;padding:10px 12px;border-right:1px solid rgba(0,255,200,0.08);text-align:center}
-.hm-hud-cell:last-child{border-right:none}
-.hm-hud-label{font-family:'Orbitron',monospace;font-size:7px;letter-spacing:2px;color:rgba(255,255,255,0.3);margin-bottom:4px}
-.hm-hud-val{font-family:'Orbitron',monospace;font-size:14px;font-weight:700;text-shadow:0 0 12px currentColor}
-.hm-section-title{font-family:'Orbitron',monospace;font-size:9px;letter-spacing:3px;color:rgba(255,255,255,0.25);border-bottom:1px solid rgba(255,255,255,0.06);padding-bottom:6px;margin-top:4px}
-.hm-session-block{background:rgba(0,0,0,0.4);border:1px solid rgba(0,255,200,0.2);border-radius:6px;padding:20px;text-align:center;position:relative;overflow:hidden}
-.hm-session-block::before{content:'';position:absolute;inset:0;background:linear-gradient(135deg,rgba(0,255,200,0.03) 0%,transparent 60%);pointer-events:none}
-.hm-session-title{font-family:'Orbitron',monospace;font-size:9px;letter-spacing:3px;color:rgba(255,255,255,0.4);margin-bottom:8px}
-.hm-session-status{font-family:'Space Mono',monospace;font-size:10px;color:rgba(0,255,200,0.6);margin-bottom:6px}
-.hm-session-timer{font-family:'Orbitron',monospace;font-size:36px;font-weight:900;color:#fff;text-shadow:0 0 30px rgba(0,255,200,0.4);letter-spacing:4px;margin-bottom:12px}
-.hm-session-input{background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.1);color:#e0f5ef;font-family:'Space Mono',monospace;font-size:10px;padding:8px 12px;border-radius:3px;outline:none;width:100%;box-sizing:border-box}
-.hm-session-input:focus{border-color:rgba(0,255,200,0.4)}
-.hm-btn{font-family:'Orbitron',monospace;font-size:10px;letter-spacing:2px;padding:10px 24px;border:none;border-radius:3px;cursor:pointer;transition:all 0.2s;font-weight:700}
-.hm-btn-start{background:rgba(0,255,200,0.15);color:#00ffc8;border:1px solid rgba(0,255,200,0.4)}
-.hm-btn-start:hover{background:rgba(0,255,200,0.3);box-shadow:0 0 20px rgba(0,255,200,0.3)}
-.hm-btn-stop{background:rgba(255,60,60,0.15);color:#ff4444;border:1px solid rgba(255,60,60,0.4)}
-.hm-btn-stop:hover{background:rgba(255,60,60,0.3);box-shadow:0 0 20px rgba(255,60,60,0.3)}
-.hm-sessions-log{display:flex;flex-direction:column;gap:4px}
-.hm-session-entry{display:flex;align-items:center;gap:10px;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.06);border-radius:3px;padding:8px 12px;font-family:'Space Mono',monospace;font-size:9px}
-.hm-se-time{color:rgba(255,255,255,0.35);flex-shrink:0;width:50px}
-.hm-se-note{flex:1;color:rgba(255,255,255,0.7)}
-.hm-se-dur{color:#00ffc8;flex-shrink:0;font-weight:700}
-.hm-empty{font-family:'Space Mono',monospace;font-size:9px;color:rgba(255,255,255,0.2);text-align:center;padding:16px}
-.hm-graph-row{display:grid;grid-template-columns:1fr 1fr;gap:12px}
-.hm-graph-panel{background:rgba(0,0,0,0.3);border:1px solid rgba(255,255,255,0.06);border-radius:4px;padding:12px}
-.hm-graph-label{font-family:'Orbitron',monospace;font-size:8px;letter-spacing:1px;color:rgba(255,255,255,0.3);margin-bottom:8px}
-.hm-graph-panel canvas{width:100%;height:80px;display:block}
-.hm-vs-row{display:flex;align-items:center;gap:12px}
-.hm-vs-card{flex:1;background:rgba(0,0,0,0.3);border:1px solid;border-radius:4px;padding:14px;text-align:center}
-.hm-vs-name{font-family:'Orbitron',monospace;font-size:12px;font-weight:700;letter-spacing:2px;margin-bottom:6px;text-shadow:0 0 14px currentColor}
-.hm-vs-stat{font-family:'Space Mono',monospace;font-size:9px;color:rgba(255,255,255,0.6);margin-bottom:4px}
-.hm-vs-week{font-family:'Space Mono',monospace;font-size:8px;color:rgba(255,255,255,0.3)}
-.hm-vs-mid{font-family:'Orbitron',monospace;font-size:18px;font-weight:900;color:rgba(255,255,255,0.15);flex-shrink:0}
 </style>
 </head>
 <body>
@@ -2505,10 +2281,9 @@ body.ui-glass .taskbar,body.u1-glass .taskbar,body.u2-glass .taskbar{background:
       <span id="qtxt" class="qtxt-inline"></span>
     </div>
     <div class="hdr-right">
-      <button class="hbtn" id="nt-home" onclick="goTab('home')">home</button>
       <button class="hbtn on" id="nt-feed" onclick="goTab('feed')">feed</button>
       <button class="hbtn" id="nt-timeline" onclick="goTab('timeline')">timeline</button>
-      <button class="hbtn" id="nt-heatmap" onclick="goTab('heatmap')">stats</button>
+      <button class="hbtn" id="nt-stats" onclick="goTab('stats')">stats</button>
       <button class="hbtn" id="nt-search" onclick="goTab('search')">search</button>
       <button class="hbtn" id="nt-export" onclick="goTab('export')">export</button>
       <div class="hdr-divider"></div>
@@ -2543,11 +2318,6 @@ body.ui-glass .taskbar,body.u1-glass .taskbar,body.u2-glass .taskbar{background:
 
 
   <!-- FEED -->
-  <!-- HOME -->
-  <div id="homeView" style="display:none;overflow-y:auto;flex:1;min-height:0;padding:0">
-    <div id="homeContent"></div>
-  </div>
-
   <div id="feedView" style="display:flex;flex:1;min-height:0;overflow:hidden">
     <div class="dual-feed" style="flex:1">
       <div class="col col-u1">
@@ -2590,7 +2360,7 @@ body.ui-glass .taskbar,body.u1-glass .taskbar,body.u2-glass .taskbar{background:
   </div>
 
   <!-- HEATMAP -->
-  <div id="heatmapView" style="display:none;overflow-y:auto;flex:1;min-height:0">
+  <div id="statsView" style="display:none;overflow-y:auto;flex:1;min-height:0">
     <div class="hmap-page">
       <div class="hmap-panel hmap-u1">
         <div class="hmap-title" id="hmapName1">MY CONSISTENCY</div>
