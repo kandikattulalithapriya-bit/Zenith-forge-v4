@@ -678,39 +678,218 @@ window.goTab = function(tab) {
   }
   if (tab === 'search') { doSearch(document.getElementById('searchInp').value); }
   if (tab === 'export') { updateExportCounts(); }
-  if (tab === 'home') { renderHomeWidgets(); }
+  if (tab === 'home') {
+    document.body.classList.add('on-home');
+    renderHomeWidgets();
+    startHomeClock();
+    // populate quote
+    const hq = document.getElementById('homeQuote');
+    if (hq) hq.textContent = '"' + QUOTES[Math.floor(Math.random()*QUOTES.length)] + '"';
+  } else {
+    document.body.classList.remove('on-home');
+  }
 };
 
+let _homeClockInterval = null;
+function startHomeClock() {
+  if (_homeClockInterval) clearInterval(_homeClockInterval);
+  function tick() {
+    const now = new Date();
+    const el = document.getElementById('bigClock');
+    if (el) el.textContent = now.toLocaleTimeString('en-IN', {hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false});
+    const dt = document.getElementById('bigDate');
+    if (dt) dt.textContent = now.toLocaleDateString('en-IN', {weekday:'long',day:'numeric',month:'long',year:'numeric'}).toUpperCase();
+    const up = document.getElementById('homeUptime');
+    if (up) {
+      const myPosts = Object.values(allPosts[ME]||{});
+      const myMaxDay = myPosts.length ? Math.max(...myPosts.map(p=>p.day||0)) : 0;
+      up.textContent = `DAY ${myMaxDay} OF THE EPOCH`;
+    }
+  }
+  tick();
+  _homeClockInterval = setInterval(tick, 1000);
+}
+
 function renderHomeWidgets() {
-  // update home stats
   const myPosts = Object.values(allPosts[ME] || {});
   const frPosts = Object.values(allPosts[FRIEND()] || {});
+  const myMaxDay = myPosts.length ? Math.max(...myPosts.map(p => p.day || 0)) : 0;
+
+  // Basic stat elements
   const el1 = document.getElementById('homeMyPosts'); if(el1) el1.textContent = myPosts.length;
   const el2 = document.getElementById('homeFrPosts'); if(el2) el2.textContent = frPosts.length;
   const el3 = document.getElementById('homeMyStreak'); if(el3) el3.textContent = streaks[ME] || 0;
   const el4 = document.getElementById('homeFrStreak'); if(el4) el4.textContent = streaks[FRIEND()] || 0;
-  const myMaxDay = myPosts.length ? Math.max(...myPosts.map(p => p.day || 0)) : 0;
   const el5 = document.getElementById('homeMyDay'); if(el5) el5.textContent = myMaxDay;
-  // Mini heatmap on home
+
+  // Session comparison widget
+  const mySessions = allSessions[ME] || [];
+  const today = new Date().toLocaleDateString([], {day:'numeric', month:'short'});
+  const yesterday = (() => { const d = new Date(); d.setDate(d.getDate()-1); return d.toLocaleDateString([],{day:'numeric',month:'short'}); })();
+  const todaySess = mySessions.filter(s => s.date === today);
+  const yestSess = mySessions.filter(s => s.date === yesterday);
+  const todayMs = todaySess.reduce((a,s) => a+(s.duration||0), 0);
+  const yestMs = yestSess.reduce((a,s) => a+(s.duration||0), 0);
+  const compEl = document.getElementById('sessionCompWidget');
+  if (compEl) {
+    if (yestMs > 0 && todayMs > 0) {
+      const pct = Math.round(((todayMs - yestMs) / yestMs) * 100);
+      const dir = pct >= 0 ? '▲' : '▼';
+      const col = pct >= 0 ? '#00ffc8' : '#ff6060';
+      compEl.innerHTML = `<div style="font-size:9px;color:rgba(255,255,255,0.4);font-family:Space Mono,monospace;letter-spacing:0.08em;margin-bottom:4px">vs yesterday</div>
+        <div style="font-family:Orbitron,monospace;font-size:20px;font-weight:900;color:${col}">${dir} ${Math.abs(pct)}%</div>
+        <div style="font-size:8px;color:rgba(255,255,255,0.35);font-family:Space Mono,monospace;margin-top:3px">today: ${fmtTime(todayMs)} · yest: ${fmtTime(yestMs)}</div>`;
+    } else if (todayMs > 0) {
+      compEl.innerHTML = `<div style="font-size:9px;color:rgba(255,255,255,0.4);font-family:Space Mono,monospace;margin-bottom:4px">today's focus</div>
+        <div style="font-family:Orbitron,monospace;font-size:20px;font-weight:900;color:var(--u1-acc)">${fmtTime(todayMs)}</div>
+        <div style="font-size:8px;color:rgba(255,255,255,0.3);font-family:Space Mono,monospace;margin-top:3px">no data for yesterday</div>`;
+    } else {
+      compEl.innerHTML = `<div style="font-size:9px;color:rgba(255,255,255,0.25);font-family:Space Mono,monospace">start a session to<br>track focus time</div>`;
+    }
+  }
+
+  // Post rate widget
+  const rateEl = document.getElementById('postRateWidget');
+  if (rateEl) {
+    const last7 = myPosts.filter(p => p.ts && p.ts > Date.now() - 7*864e5).length;
+    const prev7 = myPosts.filter(p => p.ts && p.ts > Date.now() - 14*864e5 && p.ts <= Date.now() - 7*864e5).length;
+    if (prev7 > 0) {
+      const pct = Math.round(((last7-prev7)/prev7)*100);
+      const col = pct >= 0 ? '#00ffc8' : '#ff6060';
+      rateEl.innerHTML = `<div style="font-size:9px;color:rgba(255,255,255,0.4);font-family:Space Mono,monospace;margin-bottom:4px">post rate (7d)</div>
+        <div style="font-family:Orbitron,monospace;font-size:20px;font-weight:900;color:${col}">${pct>=0?'▲':'▼'} ${Math.abs(pct)}%</div>
+        <div style="font-size:8px;color:rgba(255,255,255,0.3);font-family:Space Mono,monospace;margin-top:3px">${last7} posts this week vs ${prev7} last week</div>`;
+    } else {
+      rateEl.innerHTML = `<div style="font-size:9px;color:rgba(255,255,255,0.4);font-family:Space Mono,monospace;margin-bottom:4px">posts this week</div>
+        <div style="font-family:Orbitron,monospace;font-size:28px;font-weight:900;color:var(--u1-acc)">${last7}</div>
+        <div style="font-size:8px;color:rgba(255,255,255,0.3);font-family:Space Mono,monospace;margin-top:3px">keep the streak alive 🔥</div>`;
+    }
+  }
+
+  // Mini heatmap
   buildMiniHmap('homeMiniHmap', ME);
-  // Recent posts preview
+  buildMiniHmap('homeMiniHmapFr', FRIEND());
+
+  // Inline bar chart for 14-day post activity
+  buildHomeBarChart('homeBarChart');
+
+  // Recent posts
   const rp = document.getElementById('homeRecentPosts');
   if (rp) {
-    const sorted = myPosts.sort((a,b) => b.ts - a.ts).slice(0,3);
-    if (!sorted.length) { rp.innerHTML = '<div style="font-family:Space Mono,monospace;font-size:8px;color:rgba(255,255,255,0.2);text-align:center;padding:12px">no posts yet</div>'; }
+    const sorted = [...myPosts].sort((a,b) => b.ts - a.ts).slice(0,3);
+    if (!sorted.length) { rp.innerHTML = '<div style="font-family:Space Mono,monospace;font-size:8px;color:rgba(255,255,255,0.2);text-align:center;padding:8px">no posts yet</div>'; }
     else {
-      rp.innerHTML = sorted.map(p => `<div style="padding:8px 10px;background:var(--u1-acc2);border:1px solid var(--u1-brd);border-radius:2px;cursor:pointer" onclick="goTab('feed')">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
-          <span style="font-family:Orbitron,monospace;font-size:8px;font-weight:700;color:var(--u1-acc)">day ${p.day}</span>
-          <span style="font-family:Space Mono,monospace;font-size:7px;color:rgba(255,255,255,0.3)">${p.date}</span>
+      rp.innerHTML = sorted.map(p => `<div style="padding:6px 8px;background:var(--u1-acc2);border:1px solid var(--u1-brd);border-radius:2px;cursor:pointer;margin-bottom:4px" onclick="goTab('feed')">
+        <div style="display:flex;justify-content:space-between;margin-bottom:3px">
+          <span style="font-family:Orbitron,monospace;font-size:7px;font-weight:700;color:var(--u1-acc)">DAY ${p.day}</span>
+          <span style="font-family:Space Mono,monospace;font-size:6px;color:rgba(255,255,255,0.3)">${p.date}</span>
         </div>
-        <div style="font-size:11px;color:rgba(255,255,255,0.8);line-height:1.4;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${p.text}</div>
+        <div style="font-size:10px;color:rgba(255,255,255,0.75);line-height:1.4;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${p.text}</div>
       </div>`).join('');
     }
   }
-  // Update session stats chart
+
+  // Favorite apps
+  renderFavApps();
+
+  // Session chart
   updateSessionStatsUI();
 }
+
+function buildHomeBarChart(containerId) {
+  const c = document.getElementById(containerId);
+  if (!c) return;
+  const myPosts = Object.values(allPosts[ME]||{});
+  const frPosts = Object.values(allPosts[FRIEND()]||{});
+  const today = new Date();
+  const days = 14;
+  const labels=[], myD=[], frD=[];
+  for(let i=days-1;i>=0;i--){
+    const d=new Date(today); d.setDate(today.getDate()-i);
+    const ds=d.toLocaleDateString([],{day:'numeric',month:'short'});
+    labels.push(i===0?'today':i===1?'yday':d.toLocaleDateString([],{weekday:'short'}));
+    myD.push(myPosts.filter(p=>p.date===ds).length);
+    frD.push(frPosts.filter(p=>p.date===ds).length);
+  }
+  const max=Math.max(1,...myD,...frD);
+  c.innerHTML = `<div style="display:flex;align-items:flex-end;gap:2px;height:50px;padding:0 2px">` +
+    labels.map((l,i)=>{
+      const h1=Math.round((myD[i]/max)*44)+2, h2=Math.round((frD[i]/max)*44)+2;
+      return `<div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:1px;position:relative" title="${l}: you ${myD[i]}, friend ${frD[i]}">
+        <div style="width:100%;display:flex;gap:1px;align-items:flex-end;height:46px">
+          <div style="flex:1;height:${h1}px;background:${myD[i]>0?'var(--u1-accl)':'rgba(255,255,255,0.04)'};border-radius:1px 1px 0 0;border:${myD[i]>0?'1px solid var(--u1-brd2)':'1px solid rgba(255,255,255,0.04)'}"></div>
+          <div style="flex:1;height:${h2}px;background:${frD[i]>0?'var(--u2-accl)':'rgba(255,255,255,0.04)'};border-radius:1px 1px 0 0;border:${frD[i]>0?'1px solid var(--u2-brd2)':'1px solid rgba(255,255,255,0.04)'}"></div>
+        </div>
+      </div>`;
+    }).join('') + `</div>
+    <div style="display:flex;gap:10px;margin-top:4px">
+      <span style="font-family:Space Mono,monospace;font-size:7px;color:var(--u1-acc)">■ me</span>
+      <span style="font-family:Space Mono,monospace;font-size:7px;color:var(--u2-acc)">■ friend</span>
+    </div>`;
+}
+
+// ── FAVORITE APPS ──
+const DEFAULT_FAV_APPS = [
+  {icon:'🐙',name:'GitHub',url:'https://github.com'},
+  {icon:'🤖',name:'ChatGPT',url:'https://chat.openai.com'},
+  {icon:'▶️',name:'YouTube',url:'https://youtube.com'},
+  {icon:'📓',name:'Notion',url:'https://notion.so'},
+  {icon:'🎨',name:'Figma',url:'https://figma.com'},
+  {icon:'𝕏',name:'X',url:'https://x.com'},
+  {icon:'📐',name:'Linear',url:'https://linear.app'},
+  {icon:'🔵',name:'Claude',url:'https://claude.ai'},
+];
+
+function getFavApps() {
+  try {
+    const saved = localStorage.getItem('epoch_favapps');
+    if (saved) return JSON.parse(saved);
+  } catch(e){}
+  return DEFAULT_FAV_APPS;
+}
+function saveFavAppsData(arr) {
+  localStorage.setItem('epoch_favapps', JSON.stringify(arr));
+}
+
+function renderFavApps() {
+  const c = document.getElementById('favAppsGrid');
+  if (!c) return;
+  const apps = getFavApps();
+  c.innerHTML = apps.map((a,i) => `<a href="${a.url}" target="_blank" class="fav-app-item">
+    <span style="font-size:16px;line-height:1">${a.icon}</span>
+    <span style="font-family:Space Mono,monospace;font-size:6px;color:rgba(255,255,255,0.55);max-width:52px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:center">${a.name}</span>
+  </a>`).join('') +
+  `<div class="fav-app-item fav-add-btn" onclick="openFavEditor()" title="customize apps">
+    <span style="font-size:16px;line-height:1">⚙</span>
+    <span style="font-family:Space Mono,monospace;font-size:6px;color:rgba(255,255,255,0.35)">edit</span>
+  </div>`;
+}
+
+window.openFavEditor = function() {
+  const apps = getFavApps();
+  const modal = document.getElementById('favEditorModal');
+  const textarea = document.getElementById('favEditorTextarea');
+  if (!modal || !textarea) return;
+  textarea.value = apps.map(a => `${a.icon}|${a.name}|${a.url}`).join('\n');
+  modal.style.display = 'flex';
+};
+window.closeFavEditor = function() {
+  const modal = document.getElementById('favEditorModal');
+  if (modal) modal.style.display = 'none';
+};
+window.saveFavEditor = function() {
+  const textarea = document.getElementById('favEditorTextarea');
+  if (!textarea) return;
+  const lines = textarea.value.trim().split('\n').filter(l=>l.trim());
+  const apps = lines.map(l => {
+    const p = l.split('|');
+    return {icon:(p[0]||'🌐').trim(), name:(p[1]||'App').trim(), url:(p[2]||'#').trim()};
+  }).filter(a => a.url !== '#' || a.name !== 'App');
+  saveFavAppsData(apps);
+  renderFavApps();
+  closeFavEditor();
+  showToast('apps updated ✓');
+};
 
 
 function buildMiniHmap(containerId, user) {
@@ -2274,6 +2453,18 @@ body.ui-glass .taskbar,body.u1-glass .taskbar,body.u2-glass .taskbar{background:
 /* ── TOAST ── */
 .toast{position:fixed;bottom:80px;right:16px;background:rgba(7,18,16,0.96);border:1px solid rgba(0,255,200,0.25);padding:10px 14px;font-family:'Space Mono',monospace;font-size:9px;color:rgba(0,255,200,0.85);z-index:400;max-width:220px;border-radius:2px;animation:fadeup 0.3s ease;box-shadow:0 0 16px rgba(0,255,200,0.08)}
 @keyframes fadeup{from{opacity:0;transform:translateY(7px)}to{opacity:1;transform:translateY(0)}}
+
+/* ── HOME CLOCK ANIMATION ── */
+@keyframes clockPulse{0%,100%{text-shadow:0 0 20px var(--u1-acc),0 0 40px var(--u1-acc)}50%{text-shadow:0 0 30px var(--u1-acc),0 0 70px var(--u1-acc),0 0 100px var(--u1-acc)}}
+
+/* ── FAV APPS ── */
+.fav-app-item{display:flex;flex-direction:column;align-items:center;gap:3px;padding:6px 8px;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.07);border-radius:4px;text-decoration:none;color:inherit;cursor:pointer;transition:all 0.15s;min-width:52px}
+.fav-app-item:hover{background:var(--u1-acc2);border-color:var(--u1-brd2);transform:translateY(-1px)}
+.fav-add-btn{opacity:0.5}
+.fav-add-btn:hover{opacity:1}
+
+/* ── TASKBAR HIDE ON HOME ── */
+body.on-home .taskbar{display:none!important}
 </style>
 </head>
 <body>
@@ -2508,100 +2699,149 @@ body.ui-glass .taskbar,body.u1-glass .taskbar,body.u2-glass .taskbar{background:
 
 
   <!-- HOME VIEW — IRON MAN DASHBOARD -->
-  <div id="homeView" style="display:none;flex:1;min-height:0;overflow-y:auto;padding:14px;gap:12px;flex-direction:column">
-    <!-- TOP ROW: Session + Quick Stats -->
-    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;flex-shrink:0">
-      <!-- SESSION RECORDER WIDGET -->
-      <div id="sessionWidget" style="background:rgba(0,255,200,0.04);border:1px solid var(--u1-brd2);border-radius:4px;padding:14px;display:flex;flex-direction:column;gap:10px">
-        <div style="display:flex;align-items:center;gap:8px">
-          <div id="sessionDot" style="width:8px;height:8px;border-radius:50%;background:rgba(255,255,255,0.2);transition:all 0.3s;flex-shrink:0"></div>
-          <span style="font-family:Orbitron,monospace;font-size:10px;font-weight:700;color:var(--u1-acc);letter-spacing:0.15em">SESSION REC</span>
-        </div>
-        <div id="sessionTime" style="font-family:Orbitron,monospace;font-size:28px;font-weight:900;color:#fff;letter-spacing:0.05em;line-height:1">00:00</div>
-        <div style="display:flex;gap:6px;flex-wrap:wrap">
-          <button onclick="startSession()" style="flex:1;min-width:60px;background:var(--u1-acc);color:#000;font-family:Orbitron,monospace;font-size:8px;font-weight:700;padding:7px 8px;border:none;cursor:pointer;border-radius:2px;letter-spacing:0.08em">▶ START</button>
-          <button id="sessionPauseBtn" onclick="pauseSession()" style="flex:1;min-width:60px;background:rgba(255,170,0,0.15);border:1px solid rgba(255,170,0,0.4);color:rgba(255,170,0,0.9);font-family:Orbitron,monospace;font-size:8px;font-weight:700;padding:7px 8px;cursor:pointer;border-radius:2px;letter-spacing:0.08em">⏸ PAUSE</button>
-          <button onclick="stopSession()" style="flex:1;min-width:60px;background:rgba(255,80,80,0.1);border:1px solid rgba(255,80,80,0.35);color:rgba(255,80,80,0.8);font-family:Orbitron,monospace;font-size:8px;font-weight:700;padding:7px 8px;cursor:pointer;border-radius:2px;letter-spacing:0.08em">⏹ STOP</button>
-        </div>
-        <div style="font-family:Space Mono,monospace;font-size:8px;color:rgba(255,255,255,0.3);letter-spacing:0.05em">records work session · auto-saves to firebase</div>
-      </div>
+  <div id="homeView" style="display:none;flex:1;min-height:0;overflow-y:auto;background:transparent">
+    <div id="homeDashboard" style="padding:10px 12px 80px;display:grid;grid-template-columns:repeat(12,1fr);grid-auto-rows:min-content;gap:8px;max-width:1400px;width:100%;margin:0 auto">
 
-      <!-- MY STATS WIDGET -->
-      <div style="background:var(--u1-bg2);border:1px solid var(--u1-brd);border-radius:4px;padding:14px;display:flex;flex-direction:column;gap:10px">
-        <div style="font-family:Orbitron,monospace;font-size:9px;font-weight:700;color:var(--u1-acc);letter-spacing:0.15em">⚡ MY STATS</div>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
-          <div><div id="homeMyStreak" style="font-family:Orbitron,monospace;font-size:22px;font-weight:900;color:var(--u1-acc)">0</div><div style="font-family:Space Mono,monospace;font-size:7px;color:rgba(255,255,255,0.4);letter-spacing:0.1em">STREAK 🔥</div></div>
-          <div><div id="homeMyPosts" style="font-family:Orbitron,monospace;font-size:22px;font-weight:900;color:#fff">0</div><div style="font-family:Space Mono,monospace;font-size:7px;color:rgba(255,255,255,0.4);letter-spacing:0.1em">TOTAL POSTS</div></div>
-          <div><div id="homeMyDay" style="font-family:Orbitron,monospace;font-size:22px;font-weight:900;color:var(--u1-acc)">0</div><div style="font-family:Space Mono,monospace;font-size:7px;color:rgba(255,255,255,0.4);letter-spacing:0.1em">CURRENT DAY</div></div>
-          <div><div id="homeFrStreak" style="font-family:Orbitron,monospace;font-size:22px;font-weight:900;color:var(--u2-acc)">0</div><div style="font-family:Space Mono,monospace;font-size:7px;color:rgba(255,255,255,0.4);letter-spacing:0.1em">FRIEND STREAK 🔥</div></div>
+      <!-- FUTURISTIC CLOCK — spans 4 cols -->
+      <div style="grid-column:span 4;background:rgba(0,0,0,0.5);border:1px solid var(--u1-brd2);border-radius:4px;padding:12px;position:relative;overflow:hidden;display:flex;flex-direction:column;justify-content:center">
+        <div style="position:absolute;top:6px;right:8px;font-family:Space Mono,monospace;font-size:6px;color:rgba(255,255,255,0.2);letter-spacing:0.12em">SYSTEM TIME</div>
+        <div style="position:absolute;top:0;left:0;right:0;height:1px;background:linear-gradient(90deg,transparent,var(--u1-acc),transparent);opacity:0.7"></div>
+        <div style="position:absolute;bottom:0;left:0;right:0;height:1px;background:linear-gradient(90deg,transparent,var(--u1-acc),transparent);opacity:0.3"></div>
+        <div id="bigClock" style="font-family:Orbitron,monospace;font-size:clamp(28px,4vw,44px);font-weight:900;color:var(--u1-acc);letter-spacing:0.06em;text-shadow:0 0 30px var(--u1-acc),0 0 60px var(--u1-acc);line-height:1;animation:clockPulse 2s ease-in-out infinite">00:00:00</div>
+        <div id="bigDate" style="font-family:Rajdhani,monospace;font-size:11px;color:rgba(255,255,255,0.45);letter-spacing:0.12em;margin-top:4px;text-transform:uppercase"></div>
+        <div style="display:flex;gap:12px;margin-top:8px">
+          <div><div id="homeTZ" style="font-family:Space Mono,monospace;font-size:8px;color:rgba(255,255,255,0.3)">IST UTC+5:30</div></div>
+          <div style="flex:1;height:1px;background:var(--u1-brd);align-self:center"></div>
+          <div id="homeUptime" style="font-family:Space Mono,monospace;font-size:7px;color:rgba(255,255,255,0.2)">FORGING...</div>
         </div>
       </div>
 
-      <!-- FRIEND STATS WIDGET -->
-      <div style="background:var(--u2-bg2);border:1px solid var(--u2-brd);border-radius:4px;padding:14px;display:flex;flex-direction:column;gap:10px">
-        <div style="font-family:Orbitron,monospace;font-size:9px;font-weight:700;color:var(--u2-acc);letter-spacing:0.15em">💀 FRIEND STATS</div>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
-          <div><div id="homeFrPosts" style="font-family:Orbitron,monospace;font-size:22px;font-weight:900;color:var(--u2-acc)">0</div><div style="font-family:Space Mono,monospace;font-size:7px;color:rgba(255,255,255,0.4);letter-spacing:0.1em">TOTAL POSTS</div></div>
-          <div onclick="showWeeklyReport()" style="cursor:pointer"><div style="font-family:Orbitron,monospace;font-size:14px;font-weight:900;color:var(--u2-acc)">📊</div><div style="font-family:Space Mono,monospace;font-size:7px;color:rgba(255,255,255,0.4);letter-spacing:0.1em">WEEKLY REPORT</div></div>
-          <div onclick="goTab('feed')" style="cursor:pointer"><div style="font-family:Orbitron,monospace;font-size:14px;font-weight:900;color:var(--u2-acc)">📋</div><div style="font-family:Space Mono,monospace;font-size:7px;color:rgba(255,255,255,0.4);letter-spacing:0.1em">VIEW FEED</div></div>
-          <div onclick="goTab('stats')" style="cursor:pointer"><div style="font-family:Orbitron,monospace;font-size:14px;font-weight:900;color:var(--u2-acc)">📈</div><div style="font-family:Space Mono,monospace;font-size:7px;color:rgba(255,255,255,0.4);letter-spacing:0.1em">OPEN STATS</div></div>
+      <!-- SESSION RECORDER — spans 4 cols -->
+      <div id="sessionWidget" style="grid-column:span 4;background:rgba(0,255,200,0.03);border:1px solid var(--u1-brd2);border-radius:4px;padding:10px;position:relative;overflow:hidden">
+        <div style="position:absolute;top:0;left:0;right:0;height:1px;background:linear-gradient(90deg,transparent,var(--u1-acc),transparent);opacity:0.5"></div>
+        <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px">
+          <div id="sessionDot" style="width:7px;height:7px;border-radius:50%;background:rgba(255,255,255,0.15);transition:all 0.3s;flex-shrink:0"></div>
+          <span style="font-family:Orbitron,monospace;font-size:8px;font-weight:700;color:var(--u1-acc);letter-spacing:0.15em">SESSION REC</span>
+        </div>
+        <div id="sessionTime" style="font-family:Orbitron,monospace;font-size:26px;font-weight:900;color:#fff;letter-spacing:0.05em;line-height:1;margin-bottom:8px">00:00</div>
+        <div style="display:flex;gap:5px">
+          <button onclick="startSession()" style="flex:1;background:var(--u1-acc);color:#000;font-family:Orbitron,monospace;font-size:7px;font-weight:700;padding:6px 4px;border:none;cursor:pointer;border-radius:2px;letter-spacing:0.05em">▶ START</button>
+          <button id="sessionPauseBtn" onclick="pauseSession()" style="flex:1;background:rgba(255,170,0,0.12);border:1px solid rgba(255,170,0,0.35);color:rgba(255,170,0,0.9);font-family:Orbitron,monospace;font-size:7px;font-weight:700;padding:6px 4px;cursor:pointer;border-radius:2px;letter-spacing:0.05em">⏸ PAUSE</button>
+          <button onclick="stopSession()" style="flex:1;background:rgba(255,80,80,0.08);border:1px solid rgba(255,80,80,0.3);color:rgba(255,80,80,0.8);font-family:Orbitron,monospace;font-size:7px;font-weight:700;padding:6px 4px;cursor:pointer;border-radius:2px;letter-spacing:0.05em">⏹ STOP</button>
         </div>
       </div>
-    </div>
 
-    <!-- MIDDLE ROW: Mini heatmap + Quick post + Favorite apps -->
-    <div style="display:grid;grid-template-columns:2fr 1fr;gap:10px;flex-shrink:0">
-      <!-- MINI HEATMAP -->
-      <div style="background:rgba(0,255,200,0.03);border:1px solid var(--u1-brd);border-radius:4px;padding:14px">
-        <div style="font-family:Orbitron,monospace;font-size:9px;font-weight:700;color:var(--u1-acc);letter-spacing:0.15em;margin-bottom:10px">🗓 30-DAY CONSISTENCY</div>
+      <!-- SESSION COMPARISON WIDGET — spans 4 cols -->
+      <div style="grid-column:span 4;background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.08);border-radius:4px;padding:10px;position:relative;overflow:hidden">
+        <div style="position:absolute;top:0;left:0;right:0;height:1px;background:linear-gradient(90deg,transparent,var(--u1-acc),transparent);opacity:0.3"></div>
+        <div style="font-family:Orbitron,monospace;font-size:7px;font-weight:700;color:rgba(255,255,255,0.4);letter-spacing:0.15em;margin-bottom:6px">📈 FOCUS DELTA</div>
+        <div id="sessionCompWidget" style="font-family:Space Mono,monospace;font-size:9px;color:rgba(255,255,255,0.3)">start a session to<br>track focus time</div>
+      </div>
+
+      <!-- MY STATS — spans 3 cols -->
+      <div style="grid-column:span 3;background:var(--u1-bg2);border:1px solid var(--u1-brd);border-radius:4px;padding:10px;position:relative;overflow:hidden">
+        <div style="position:absolute;top:0;left:0;right:0;height:1px;background:linear-gradient(90deg,transparent,var(--u1-acc),transparent)"></div>
+        <div style="font-family:Orbitron,monospace;font-size:7px;font-weight:700;color:var(--u1-acc);letter-spacing:0.15em;margin-bottom:8px">⚡ MY STATS</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">
+          <div><div id="homeMyStreak" style="font-family:Orbitron,monospace;font-size:20px;font-weight:900;color:var(--u1-acc);line-height:1">0</div><div style="font-family:Space Mono,monospace;font-size:6px;color:rgba(255,255,255,0.35);letter-spacing:0.08em;margin-top:2px">STREAK 🔥</div></div>
+          <div><div id="homeMyPosts" style="font-family:Orbitron,monospace;font-size:20px;font-weight:900;color:#fff;line-height:1">0</div><div style="font-family:Space Mono,monospace;font-size:6px;color:rgba(255,255,255,0.35);letter-spacing:0.08em;margin-top:2px">POSTS</div></div>
+          <div><div id="homeMyDay" style="font-family:Orbitron,monospace;font-size:20px;font-weight:900;color:var(--u1-acc);line-height:1">0</div><div style="font-family:Space Mono,monospace;font-size:6px;color:rgba(255,255,255,0.35);letter-spacing:0.08em;margin-top:2px">CURR DAY</div></div>
+          <div><div id="postRateWidget" style="font-size:9px;color:rgba(255,255,255,0.4)">—</div></div>
+        </div>
+      </div>
+
+      <!-- FRIEND STATS — spans 3 cols -->
+      <div style="grid-column:span 3;background:var(--u2-bg2);border:1px solid var(--u2-brd);border-radius:4px;padding:10px;position:relative;overflow:hidden">
+        <div style="position:absolute;top:0;left:0;right:0;height:1px;background:linear-gradient(90deg,transparent,var(--u2-acc),transparent)"></div>
+        <div style="font-family:Orbitron,monospace;font-size:7px;font-weight:700;color:var(--u2-acc);letter-spacing:0.15em;margin-bottom:8px">⚡ FRIEND STATS</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">
+          <div><div id="homeFrStreak" style="font-family:Orbitron,monospace;font-size:20px;font-weight:900;color:var(--u2-acc);line-height:1">0</div><div style="font-family:Space Mono,monospace;font-size:6px;color:rgba(255,255,255,0.35);letter-spacing:0.08em;margin-top:2px">STREAK 🔥</div></div>
+          <div><div id="homeFrPosts" style="font-family:Orbitron,monospace;font-size:20px;font-weight:900;color:var(--u2-acc);line-height:1">0</div><div style="font-family:Space Mono,monospace;font-size:6px;color:rgba(255,255,255,0.35);letter-spacing:0.08em;margin-top:2px">POSTS</div></div>
+          <div onclick="showWeeklyReport()" style="cursor:pointer"><div style="font-family:Orbitron,monospace;font-size:12px;font-weight:900;color:var(--u2-acc)">📊</div><div style="font-family:Space Mono,monospace;font-size:6px;color:rgba(255,255,255,0.35);margin-top:2px">WEEKLY</div></div>
+          <div onclick="goTab('stats')" style="cursor:pointer"><div style="font-family:Orbitron,monospace;font-size:12px;font-weight:900;color:var(--u2-acc)">📈</div><div style="font-family:Space Mono,monospace;font-size:6px;color:rgba(255,255,255,0.35);margin-top:2px">STATS</div></div>
+        </div>
+      </div>
+
+      <!-- POST ACTIVITY CHART — spans 6 cols -->
+      <div style="grid-column:span 6;background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.07);border-radius:4px;padding:10px;position:relative;overflow:hidden">
+        <div style="position:absolute;top:0;left:0;right:0;height:1px;background:linear-gradient(90deg,transparent,var(--u1-acc),transparent);opacity:0.4"></div>
+        <div style="font-family:Orbitron,monospace;font-size:7px;font-weight:700;color:rgba(255,255,255,0.4);letter-spacing:0.15em;margin-bottom:6px">📊 14-DAY ACTIVITY</div>
+        <div id="homeBarChart"></div>
+      </div>
+
+      <!-- MY 30-DAY HEATMAP — spans 4 cols -->
+      <div style="grid-column:span 4;background:rgba(0,255,200,0.02);border:1px solid var(--u1-brd);border-radius:4px;padding:10px;position:relative;overflow:hidden">
+        <div style="position:absolute;top:0;left:0;right:0;height:1px;background:linear-gradient(90deg,transparent,var(--u1-acc),transparent);opacity:0.4"></div>
+        <div style="font-family:Orbitron,monospace;font-size:7px;font-weight:700;color:var(--u1-acc);letter-spacing:0.15em;margin-bottom:6px">🗓 MY 30D GRID</div>
         <div id="homeMiniHmap"></div>
-        <div style="font-family:Space Mono,monospace;font-size:7px;color:rgba(255,255,255,0.3);letter-spacing:0.08em;margin-top:8px">each square = 1 day · <span style="color:var(--u1-acc)">●</span> posted · <span style="color:rgba(255,255,255,0.2)">○</span> missed</div>
       </div>
 
-      <!-- QUICK ACTIONS -->
-      <div style="background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.08);border-radius:4px;padding:14px;display:flex;flex-direction:column;gap:8px">
-        <div style="font-family:Orbitron,monospace;font-size:9px;font-weight:700;color:rgba(255,255,255,0.6);letter-spacing:0.15em;margin-bottom:2px">⚡ QUICK ACTIONS</div>
-        <button onclick="goTab('feed');setTimeout(()=>document.getElementById('pinp1').focus(),100)" style="background:var(--u1-acc2);border:1px solid var(--u1-brd2);color:var(--u1-acc);font-family:Orbitron,monospace;font-size:9px;font-weight:700;padding:10px;cursor:pointer;border-radius:2px;text-align:left;letter-spacing:0.08em">✍ LOG POST</button>
-        <button onclick="startSession()" style="background:rgba(0,255,200,0.08);border:1px solid rgba(0,255,200,0.3);color:#00ffc8;font-family:Orbitron,monospace;font-size:9px;font-weight:700;padding:10px;cursor:pointer;border-radius:2px;text-align:left;letter-spacing:0.08em">🎬 START SESSION</button>
-        <button onclick="showWeeklyReport()" style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.1);color:rgba(255,255,255,0.6);font-family:Orbitron,monospace;font-size:9px;font-weight:700;padding:10px;cursor:pointer;border-radius:2px;text-align:left;letter-spacing:0.08em">📊 WEEKLY WRAP</button>
-        <button onclick="goTab('stats')" style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.1);color:rgba(255,255,255,0.6);font-family:Orbitron,monospace;font-size:9px;font-weight:700;padding:10px;cursor:pointer;border-radius:2px;text-align:left;letter-spacing:0.08em">📈 VIEW STATS</button>
+      <!-- FRIEND 30-DAY HEATMAP — spans 4 cols -->
+      <div style="grid-column:span 4;background:var(--u2-bg);border:1px solid var(--u2-brd);border-radius:4px;padding:10px;position:relative;overflow:hidden">
+        <div style="position:absolute;top:0;left:0;right:0;height:1px;background:linear-gradient(90deg,transparent,var(--u2-acc),transparent);opacity:0.4"></div>
+        <div style="font-family:Orbitron,monospace;font-size:7px;font-weight:700;color:var(--u2-acc);letter-spacing:0.15em;margin-bottom:6px">🗓 FRIEND 30D GRID</div>
+        <div id="homeMiniHmapFr"></div>
       </div>
+
+      <!-- SESSION CHART — spans 4 cols -->
+      <div style="grid-column:span 4;background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.07);border-radius:4px;padding:10px;position:relative;overflow:hidden">
+        <div style="position:absolute;top:0;left:0;right:0;height:1px;background:linear-gradient(90deg,transparent,rgba(255,255,255,0.3),transparent)"></div>
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+          <div style="font-family:Orbitron,monospace;font-size:7px;font-weight:700;color:rgba(255,255,255,0.4);letter-spacing:0.15em">⏱ SESSION HISTORY</div>
+          <button onclick="goTab('stats')" style="background:none;border:1px solid rgba(255,255,255,0.1);color:rgba(255,255,255,0.3);font-family:Space Mono,monospace;font-size:6px;padding:2px 6px;cursor:pointer;border-radius:2px">more →</button>
+        </div>
+        <div id="statsSessionChart" style="min-height:60px"></div>
+      </div>
+
+      <!-- FAVORITE APPS — spans 8 cols -->
+      <div style="grid-column:span 8;background:rgba(255,255,255,0.015);border:1px solid rgba(255,255,255,0.07);border-radius:4px;padding:10px;position:relative;overflow:hidden">
+        <div style="position:absolute;top:0;left:0;right:0;height:1px;background:linear-gradient(90deg,transparent,rgba(255,255,255,0.15),transparent)"></div>
+        <div style="font-family:Orbitron,monospace;font-size:7px;font-weight:700;color:rgba(255,255,255,0.35);letter-spacing:0.15em;margin-bottom:8px">★ SHORTCUTS</div>
+        <div id="favAppsGrid" style="display:flex;flex-wrap:wrap;gap:6px"></div>
+      </div>
+
+      <!-- QUICK ACTIONS — spans 4 cols -->
+      <div style="grid-column:span 4;background:rgba(255,255,255,0.015);border:1px solid rgba(255,255,255,0.07);border-radius:4px;padding:10px">
+        <div style="font-family:Orbitron,monospace;font-size:7px;font-weight:700;color:rgba(255,255,255,0.4);letter-spacing:0.15em;margin-bottom:8px">⚡ ACTIONS</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:5px">
+          <button onclick="goTab('feed');setTimeout(()=>document.getElementById('pinp1').focus(),100)" style="background:var(--u1-acc2);border:1px solid var(--u1-brd2);color:var(--u1-acc);font-family:Orbitron,monospace;font-size:7px;font-weight:700;padding:8px 6px;cursor:pointer;border-radius:2px;letter-spacing:0.06em">✍ LOG</button>
+          <button onclick="startSession()" style="background:rgba(0,255,200,0.06);border:1px solid rgba(0,255,200,0.25);color:#00ffc8;font-family:Orbitron,monospace;font-size:7px;font-weight:700;padding:8px 6px;cursor:pointer;border-radius:2px;letter-spacing:0.06em">🎬 REC</button>
+          <button onclick="showWeeklyReport()" style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.1);color:rgba(255,255,255,0.5);font-family:Orbitron,monospace;font-size:7px;font-weight:700;padding:8px 6px;cursor:pointer;border-radius:2px;letter-spacing:0.06em">📊 WRAP</button>
+          <button onclick="goTab('stats')" style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.1);color:rgba(255,255,255,0.5);font-family:Orbitron,monospace;font-size:7px;font-weight:700;padding:8px 6px;cursor:pointer;border-radius:2px;letter-spacing:0.06em">📈 STATS</button>
+        </div>
+      </div>
+
+      <!-- RECENT POSTS — spans 6 cols -->
+      <div style="grid-column:span 6;background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.07);border-radius:4px;padding:10px;position:relative;overflow:hidden">
+        <div style="position:absolute;top:0;left:0;right:0;height:1px;background:linear-gradient(90deg,transparent,var(--u1-acc),transparent);opacity:0.3"></div>
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+          <div style="font-family:Orbitron,monospace;font-size:7px;font-weight:700;color:rgba(255,255,255,0.4);letter-spacing:0.15em">📋 RECENT POSTS</div>
+          <button onclick="goTab('feed')" style="background:none;border:1px solid rgba(255,255,255,0.1);color:rgba(255,255,255,0.3);font-family:Space Mono,monospace;font-size:6px;padding:2px 6px;cursor:pointer;border-radius:2px">feed →</button>
+        </div>
+        <div id="homeRecentPosts"></div>
+      </div>
+
+      <!-- QUOTE — spans 6 cols -->
+      <div style="grid-column:span 6;background:rgba(255,255,255,0.01);border:1px solid rgba(255,255,255,0.05);border-radius:4px;padding:12px;display:flex;flex-direction:column;justify-content:center;position:relative;overflow:hidden">
+        <div style="position:absolute;left:0;top:0;bottom:0;width:2px;background:var(--u1-acc);opacity:0.4"></div>
+        <div style="font-family:Rajdhani,sans-serif;font-size:13px;font-style:italic;color:rgba(255,255,255,0.55);line-height:1.6;padding-left:10px" id="homeQuote"></div>
+      </div>
+
     </div>
+  </div>
 
-    <!-- FAVORITE APPS BAR -->
-    <div style="background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.07);border-radius:4px;padding:12px;flex-shrink:0">
-      <div style="font-family:Orbitron,monospace;font-size:8px;font-weight:700;color:rgba(255,255,255,0.4);letter-spacing:0.15em;margin-bottom:10px">★ FAVORITE APPS</div>
-      <div style="display:flex;gap:10px;flex-wrap:wrap">
-        <a href="https://github.com" target="_blank" style="display:flex;flex-direction:column;align-items:center;gap:4px;text-decoration:none;padding:8px 12px;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);border-radius:4px;cursor:pointer;transition:all 0.2s" onmouseover="this.style.borderColor='var(--u1-acc)'" onmouseout="this.style.borderColor='rgba(255,255,255,0.08)'"><span style="font-size:18px">🐙</span><span style="font-family:Space Mono,monospace;font-size:7px;color:rgba(255,255,255,0.5)">GitHub</span></a>
-        <a href="https://chat.openai.com" target="_blank" style="display:flex;flex-direction:column;align-items:center;gap:4px;text-decoration:none;padding:8px 12px;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);border-radius:4px;cursor:pointer;transition:all 0.2s" onmouseover="this.style.borderColor='var(--u1-acc)'" onmouseout="this.style.borderColor='rgba(255,255,255,0.08)'"><span style="font-size:18px">🤖</span><span style="font-family:Space Mono,monospace;font-size:7px;color:rgba(255,255,255,0.5)">ChatGPT</span></a>
-        <a href="https://youtube.com" target="_blank" style="display:flex;flex-direction:column;align-items:center;gap:4px;text-decoration:none;padding:8px 12px;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);border-radius:4px;cursor:pointer;transition:all 0.2s" onmouseover="this.style.borderColor='var(--u1-acc)'" onmouseout="this.style.borderColor='rgba(255,255,255,0.08)'"><span style="font-size:18px">▶️</span><span style="font-family:Space Mono,monospace;font-size:7px;color:rgba(255,255,255,0.5)">YouTube</span></a>
-        <a href="https://notion.so" target="_blank" style="display:flex;flex-direction:column;align-items:center;gap:4px;text-decoration:none;padding:8px 12px;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);border-radius:4px;cursor:pointer;transition:all 0.2s" onmouseover="this.style.borderColor='var(--u1-acc)'" onmouseout="this.style.borderColor='rgba(255,255,255,0.08)'"><span style="font-size:18px">📓</span><span style="font-family:Space Mono,monospace;font-size:7px;color:rgba(255,255,255,0.5)">Notion</span></a>
-        <a href="https://figma.com" target="_blank" style="display:flex;flex-direction:column;align-items:center;gap:4px;text-decoration:none;padding:8px 12px;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);border-radius:4px;cursor:pointer;transition:all 0.2s" onmouseover="this.style.borderColor='var(--u1-acc)'" onmouseout="this.style.borderColor='rgba(255,255,255,0.08)'"><span style="font-size:18px">🎨</span><span style="font-family:Space Mono,monospace;font-size:7px;color:rgba(255,255,255,0.5)">Figma</span></a>
-        <a href="https://linear.app" target="_blank" style="display:flex;flex-direction:column;align-items:center;gap:4px;text-decoration:none;padding:8px 12px;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);border-radius:4px;cursor:pointer;transition:all 0.2s" onmouseover="this.style.borderColor='var(--u1-acc)'" onmouseout="this.style.borderColor='rgba(255,255,255,0.08)'"><span style="font-size:18px">📐</span><span style="font-family:Space Mono,monospace;font-size:7px;color:rgba(255,255,255,0.5)">Linear</span></a>
-        <a href="https://x.com" target="_blank" style="display:flex;flex-direction:column;align-items:center;gap:4px;text-decoration:none;padding:8px 12px;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);border-radius:4px;cursor:pointer;transition:all 0.2s" onmouseover="this.style.borderColor='var(--u1-acc)'" onmouseout="this.style.borderColor='rgba(255,255,255,0.08)'"><span style="font-size:18px">𝕏</span><span style="font-family:Space Mono,monospace;font-size:7px;color:rgba(255,255,255,0.5)">X/Twitter</span></a>
+  <!-- FAV APPS EDITOR MODAL -->
+  <div id="favEditorModal" style="display:none;position:fixed;inset:0;z-index:9000;background:rgba(0,0,0,0.85);align-items:center;justify-content:center;backdrop-filter:blur(6px)">
+    <div style="background:#040810;border:1px solid var(--u1-brd2);border-radius:6px;padding:22px;width:380px;max-width:95vw;box-shadow:0 0 60px rgba(0,0,0,0.8)">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
+        <div style="font-family:Orbitron,monospace;font-size:10px;font-weight:700;color:var(--u1-acc);letter-spacing:0.15em">★ CUSTOMIZE SHORTCUTS</div>
+        <button onclick="closeFavEditor()" style="background:none;border:none;color:rgba(255,255,255,0.4);cursor:pointer;font-size:14px">✕</button>
       </div>
-    </div>
-
-    <!-- BOTTOM ROW: Quote + Recent activity -->
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;flex-shrink:0;flex:1">
-      <!-- RECENT POSTS PREVIEW -->
-      <div style="background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.07);border-radius:4px;padding:14px;overflow:hidden">
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
-          <div style="font-family:Orbitron,monospace;font-size:9px;font-weight:700;color:rgba(255,255,255,0.5);letter-spacing:0.15em">📋 RECENT POSTS</div>
-          <button onclick="goTab('feed')" style="background:none;border:1px solid rgba(255,255,255,0.1);color:rgba(255,255,255,0.4);font-family:Space Mono,monospace;font-size:7px;padding:3px 8px;cursor:pointer;border-radius:2px;letter-spacing:0.05em">view more →</button>
-        </div>
-        <div id="homeRecentPosts" style="display:flex;flex-direction:column;gap:6px">
-          <div style="font-family:Space Mono,monospace;font-size:8px;color:rgba(255,255,255,0.2);text-align:center;padding:12px">loading...</div>
-        </div>
-      </div>
-
-      <!-- SESSION HISTORY CHART -->
-      <div style="background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.07);border-radius:4px;padding:14px">
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
-          <div style="font-family:Orbitron,monospace;font-size:9px;font-weight:700;color:rgba(255,255,255,0.5);letter-spacing:0.15em">⏱ SESSION HISTORY</div>
-          <button onclick="goTab('stats')" style="background:none;border:1px solid rgba(255,255,255,0.1);color:rgba(255,255,255,0.4);font-family:Space Mono,monospace;font-size:7px;padding:3px 8px;cursor:pointer;border-radius:2px;letter-spacing:0.05em">📈 more stats →</button>
-        </div>
-        <div id="statsSessionChart" style="min-height:80px"></div>
+      <div style="font-family:Space Mono,monospace;font-size:8px;color:rgba(255,255,255,0.4);margin-bottom:8px;line-height:1.6">one app per line: <span style="color:var(--u1-acc)">emoji|Name|URL</span><br>e.g. 🐙|GitHub|https://github.com</div>
+      <textarea id="favEditorTextarea" style="width:100%;height:160px;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.1);color:#e0f5ef;font-family:Space Mono,monospace;font-size:10px;padding:10px;border-radius:3px;outline:none;resize:vertical;line-height:1.7" placeholder="🐙|GitHub|https://github.com"></textarea>
+      <div style="display:flex;gap:8px;margin-top:12px">
+        <button onclick="saveFavEditor()" style="flex:1;background:var(--u1-acc);color:#000;font-family:Orbitron,monospace;font-size:9px;font-weight:700;padding:10px;border:none;cursor:pointer;border-radius:3px;letter-spacing:0.1em">SAVE</button>
+        <button onclick="closeFavEditor()" style="flex:1;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.1);color:rgba(255,255,255,0.5);font-family:Orbitron,monospace;font-size:9px;font-weight:700;padding:10px;cursor:pointer;border-radius:3px;letter-spacing:0.1em">CANCEL</button>
       </div>
     </div>
   </div>
