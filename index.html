@@ -6,6 +6,33 @@
 <title>Zenith Forge</title>
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpath d='M2 16 Q16 3 30 16 Q16 29 2 16 Z' stroke='%23ff2222' stroke-width='1.8' fill='none'/%3E%3Ccircle cx='16' cy='16' r='5.5' stroke='%23ff2222' stroke-width='1.4' fill='none'/%3E%3Ccircle cx='16' cy='16' r='2.8' fill='%23ff2222'/%3E%3Ccircle cx='14' cy='14' r='1' fill='white' opacity='0.9'/%3E%3Cline x1='8' y1='9' x2='7' y2='5' stroke='%23ff2222' stroke-width='1' opacity='0.7'/%3E%3Cline x1='13' y1='6' x2='12' y2='2' stroke='%23ff2222' stroke-width='1' opacity='0.7'/%3E%3Cline x1='19' y1='6' x2='20' y2='2' stroke='%23ff2222' stroke-width='1' opacity='0.7'/%3E%3Cline x1='24' y1='9' x2='26' y2='5' stroke='%23ff2222' stroke-width='1' opacity='0.7'/%3E%3C/svg%3E">
 <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;600;700;900&family=Space+Mono:wght@400;700&family=Rajdhani:wght@500;600;700&family=Exo+2:wght@200;300;400;600;700&display=swap" rel="stylesheet">
+<!-- HOVER TOOLTIP SYSTEM -->
+<style>
+#chartTooltip {
+  position: fixed;
+  pointer-events: none;
+  z-index: 99999;
+  background: rgba(4,6,14,0.97);
+  border: 1px solid rgba(0,255,200,0.35);
+  border-radius: 4px;
+  padding: 7px 11px;
+  font-family: 'Space Mono', monospace;
+  font-size: 10px;
+  color: #e0f5ef;
+  white-space: nowrap;
+  box-shadow: 0 4px 24px rgba(0,0,0,0.7), 0 0 12px rgba(0,255,200,0.1);
+  opacity: 0;
+  transition: opacity 0.12s;
+  max-width: 220px;
+}
+#chartTooltip.visible { opacity: 1; }
+#chartTooltip .tt-title { font-size: 9px; color: rgba(255,255,255,0.45); margin-bottom: 3px; letter-spacing: 0.06em; }
+#chartTooltip .tt-val { font-size: 13px; font-weight: 700; color: var(--u1-acc, #00ffc8); }
+#chartTooltip .tt-val2 { font-size: 13px; font-weight: 700; color: var(--u2-acc, #ff00cc); }
+#chartTooltip .tt-sub { font-size: 8px; color: rgba(255,255,255,0.35); margin-top: 2px; }
+[class*="chart-bar-hover"]:hover,
+div[onmouseenter]:hover { filter: brightness(1.4) !important; }
+</style>
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
 import { getDatabase, ref, push, onValue, update, set, remove } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js";
@@ -198,7 +225,7 @@ function updateSessionStatsUI() {
     el.innerHTML = '<div style="display:flex;align-items:flex-end;gap:6px;height:80px;padding:0 4px">' +
       last7.map((s,i) => {
         const h = Math.round((s.duration / maxDur) * 70) + 10;
-        return `<div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:3px"><div style="width:100%;height:${h}px;background:var(--u1-accl);border:1px solid var(--u1-brd2);border-radius:2px;transition:all 0.3s" title="${fmtTime(s.duration||0)}"></div><div style="font-family:Space Mono,monospace;font-size:7px;color:rgba(255,255,255,0.4)">${s.date||''}</div></div>`;
+        return `<div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:3px"><div class="chart-bar-hover" style="width:100%;height:${h}px;background:var(--u1-accl);border:1px solid var(--u1-brd2);border-radius:2px;transition:all 0.15s;cursor:default" onmouseenter="showTT(this,'<div class=tt-title>SESSION ${i+1}</div><div class=tt-val>${fmtTime(s.duration||0)}</div><div class=tt-sub>${s.date||''}</div>')" onmouseleave="hideTT()"></div><div style="font-family:Space Mono,monospace;font-size:7px;color:rgba(255,255,255,0.4)">${s.date||''}</div></div>`;
       }).join('') + '</div>';
   });
 }
@@ -559,7 +586,13 @@ function buildHmap(user, days) {
     cell.style.flexShrink = '0';
     cell.style.cursor = 'default';
     cell.style.transition = 'all 0.15s';
-    cell.title = titleDates.join(' – ');
+    const ttLabel = titleDates.join(' – ');
+    const ttStatus = hasPost ? '✓ posted' : isToday ? '— today' : '✗ missed';
+    const ttColor = hasPost ? `var(--${col}-acc)` : isToday ? '#ffcc44' : 'rgba(255,255,255,0.35)';
+    cell.addEventListener('mouseenter', function() {
+      showTT(this, `<div class="tt-title">${ttLabel}</div><div style="font-size:11px;font-weight:700;color:${ttColor};font-family:'Space Mono',monospace">${ttStatus}</div>`);
+    });
+    cell.addEventListener('mouseleave', hideTT);
     if (hasPost) {
       cell.style.border = `1px solid var(--${col}-brd2)`;
       cell.style.background = `var(--${col}-accl)`;
@@ -844,10 +877,10 @@ function buildHomeBarChart(containerId) {
   c.innerHTML = `<div style="display:flex;align-items:flex-end;gap:2px;height:50px;padding:0 2px">` +
     labels.map((l,i)=>{
       const h1=Math.round((myD[i]/max)*44)+2, h2=Math.round((frD[i]/max)*44)+2;
-      return `<div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:1px;position:relative" title="${l}: you ${myD[i]}, friend ${frD[i]}">
+      return `<div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:1px;position:relative">
         <div style="width:100%;display:flex;gap:1px;align-items:flex-end;height:46px">
-          <div style="flex:1;height:${h1}px;background:${myD[i]>0?'var(--u1-accl)':'rgba(255,255,255,0.04)'};border-radius:1px 1px 0 0;border:${myD[i]>0?'1px solid var(--u1-brd2)':'1px solid rgba(255,255,255,0.04)'}"></div>
-          <div style="flex:1;height:${h2}px;background:${frD[i]>0?'var(--u2-accl)':'rgba(255,255,255,0.04)'};border-radius:1px 1px 0 0;border:${frD[i]>0?'1px solid var(--u2-brd2)':'1px solid rgba(255,255,255,0.04)'}"></div>
+          <div style="flex:1;height:${h1}px;background:${myD[i]>0?'var(--u1-accl)':'rgba(255,255,255,0.04)'};border-radius:1px 1px 0 0;border:${myD[i]>0?'1px solid var(--u1-brd2)':'1px solid rgba(255,255,255,0.04)'};cursor:default;transition:filter 0.1s" onmouseenter="showTT(this,'<div class=tt-title>${l.toUpperCase()}</div><div class=tt-val>${myD[i]} post${myD[i]!==1?\'s\':\'\'}</div><div class=tt-sub>me</div>')" onmouseleave="hideTT()"></div>
+          <div style="flex:1;height:${h2}px;background:${frD[i]>0?'var(--u2-accl)':'rgba(255,255,255,0.04)'};border-radius:1px 1px 0 0;border:${frD[i]>0?'1px solid var(--u2-brd2)':'1px solid rgba(255,255,255,0.04)'};cursor:default;transition:filter 0.1s" onmouseenter="showTT(this,'<div class=tt-title>${l.toUpperCase()}</div><div class=tt-val2>${frD[i]} post${frD[i]!==1?\'s\':\'\'}</div><div class=tt-sub>friend</div>')" onmouseleave="hideTT()"></div>
         </div>
       </div>`;
     }).join('') + `</div>
@@ -937,8 +970,15 @@ function buildMiniHmap(containerId, user) {
     d.setDate(today.getDate() - i);
     const ds = d.toLocaleDateString([], {day:'numeric', month:'short'});
     const cell = document.createElement('div');
-    cell.style.cssText = `width:12px;height:12px;border-radius:2px;flex-shrink:0;border:1px solid ${postDates.has(ds) ? 'var(--'+col+'-brd2)' : 'rgba(255,255,255,0.07)'};background:${postDates.has(ds) ? 'var(--'+col+'-accl)' : 'rgba(255,255,255,0.03)'};cursor:default`;
-    cell.title = ds;
+    const hasPost = postDates.has(ds);
+    const isToday = i === 0;
+    cell.style.cssText = `width:12px;height:12px;border-radius:2px;flex-shrink:0;border:1px solid ${hasPost ? 'var(--'+col+'-brd2)' : 'rgba(255,255,255,0.07)'};background:${hasPost ? 'var(--'+col+'-accl)' : 'rgba(255,255,255,0.03)'};cursor:default`;
+    const ttStatus = hasPost ? '✓ posted' : isToday ? '— today' : '✗ missed';
+    const ttColor = hasPost ? `var(--${col}-acc)` : isToday ? '#ffcc44' : 'rgba(255,255,255,0.35)';
+    cell.addEventListener('mouseenter', function() {
+      showTT(this, `<div class="tt-title">${ds}</div><div style="font-size:11px;font-weight:700;color:${ttColor};font-family:'Space Mono',monospace">${ttStatus}</div>`);
+    });
+    cell.addEventListener('mouseleave', hideTT);
     c.appendChild(cell);
   }
 }
@@ -956,7 +996,7 @@ function renderStatsView() {
   chart.innerHTML = '<div style="display:flex;align-items:flex-end;gap:4px;height:70px">' +
     days.map((ds,i) => {
       const h = Math.round((counts[i]/max)*60)+4;
-      return `<div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:2px"><div style="width:100%;height:${h}px;background:${counts[i]>0?'var(--u1-accl)':'rgba(255,255,255,0.04)'};border:1px solid ${counts[i]>0?'var(--u1-brd2)':'rgba(255,255,255,0.06)'};border-radius:2px;transition:all 0.3s" title="${ds}: ${counts[i]} posts"></div><div style="font-family:Space Mono,monospace;font-size:6px;color:rgba(255,255,255,0.3);transform:rotate(-45deg);transform-origin:center;white-space:nowrap">${ds.split(' ')[0]}</div></div>`;
+      return `<div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:2px"><div style="width:100%;height:${h}px;background:${counts[i]>0?'var(--u1-accl)':'rgba(255,255,255,0.04)'};border:1px solid ${counts[i]>0?'var(--u1-brd2)':'rgba(255,255,255,0.06)'};border-radius:2px;transition:all 0.15s;cursor:default" onmouseenter="showTT(this,'<div class=tt-title>${ds}</div><div class=tt-val>${counts[i]} post${counts[i]!==1?\'s\':\'\'}</div>')" onmouseleave="hideTT()"></div><div style="font-family:Space Mono,monospace;font-size:6px;color:rgba(255,255,255,0.3);transform:rotate(-45deg);transform-origin:center;white-space:nowrap">${ds.split(' ')[0]}</div></div>`;
     }).join('') + '</div>';
 }
 
@@ -2504,6 +2544,38 @@ body.on-home .taskbar{display:none!important}
 </style>
 </head>
 <body>
+<!-- CHART TOOLTIP -->
+<div id="chartTooltip"></div>
+<script>
+(function(){
+  const tt = document.getElementById('chartTooltip');
+  let hideTimer;
+  window.showTT = function(el, html) {
+    clearTimeout(hideTimer);
+    tt.innerHTML = html;
+    tt.classList.add('visible');
+    positionTT(el);
+  };
+  window.hideTT = function() {
+    hideTimer = setTimeout(() => tt.classList.remove('visible'), 80);
+  };
+  function positionTT(el) {
+    const r = el.getBoundingClientRect();
+    let top = r.top - tt.offsetHeight - 10;
+    let left = r.left + r.width/2 - tt.offsetWidth/2;
+    if (top < 8) top = r.bottom + 8;
+    if (left < 8) left = 8;
+    if (left + tt.offsetWidth > window.innerWidth - 8) left = window.innerWidth - tt.offsetWidth - 8;
+    tt.style.top = top + 'px';
+    tt.style.left = left + 'px';
+  }
+  document.addEventListener('mousemove', function(e) {
+    if (tt.classList.contains('visible')) {
+      positionTT({getBoundingClientRect:()=>({top:e.clientY,bottom:e.clientY,left:e.clientX,width:0,height:0})});
+    }
+  });
+})();
+</script>
 <div id="gbg"></div>
 <div id="scanlines"></div>
 <div id="app">
