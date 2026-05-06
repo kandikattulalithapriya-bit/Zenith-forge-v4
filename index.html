@@ -156,12 +156,8 @@ window.stopSession = function() {
       updateSessionStatsUI();
     } catch(e){}
   }).catch(()=>{});
-  // Ask to post
-  setTimeout(() => {
-    if (confirm('📸 Session complete! Want to log a post now?')) {
-      document.getElementById('pinp1').focus();
-    }
-  }, 500);
+  // Ask to post — in-app modal
+  setTimeout(() => { showSessionCompleteModal(elapsed); }, 500);
 };
 
 function updateSessionUI() {
@@ -195,11 +191,23 @@ function updateSessionStatsUI() {
     const last7 = mine.slice(-7);
     if (!last7.length) { el.innerHTML = '<div style="text-align:center;padding:20px;font-family:Space Mono,monospace;font-size:9px;color:rgba(255,255,255,0.3)">no sessions yet — use 🎬 on home to record</div>'; return; }
     const maxDur = Math.max(...last7.map(s => s.duration || 0)) || 1;
-    el.innerHTML = '<div style="display:flex;align-items:flex-end;gap:6px;height:80px;padding:0 4px">' +
+    const tipId = id+'_tip';
+    el.style.position='relative';
+    el.innerHTML = `<div id="${tipId}" style="display:none;position:absolute;top:-28px;background:rgba(4,8,18,0.97);border:1px solid rgba(0,255,200,0.25);padding:3px 9px;font-family:Space Mono,monospace;font-size:8px;color:#e0f5ef;border-radius:3px;white-space:nowrap;z-index:100;pointer-events:none"></div>` +
+      '<div style="display:flex;align-items:flex-end;gap:6px;height:80px;padding:0 4px">' +
       last7.map((s,i) => {
         const h = Math.round((s.duration / maxDur) * 70) + 10;
-        return `<div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:3px"><div style="width:100%;height:${h}px;background:var(--u1-accl);border:1px solid var(--u1-brd2);border-radius:2px;transition:all 0.3s" title="${fmtTime(s.duration||0)}"></div><div style="font-family:Space Mono,monospace;font-size:7px;color:rgba(255,255,255,0.4)">${s.date||''}</div></div>`;
+        return `<div class="sess-bar" data-dur="${fmtTime(s.duration||0)}" data-date="${s.date||''}" style="flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;cursor:default"><div style="width:100%;height:${h}px;background:var(--u1-accl);border:1px solid var(--u1-brd2);border-radius:2px;transition:all 0.3s"></div><div style="font-family:Space Mono,monospace;font-size:7px;color:rgba(255,255,255,0.4)">${s.date||''}</div></div>`;
       }).join('') + '</div>';
+    const tip = document.getElementById(tipId);
+    el.querySelectorAll('.sess-bar').forEach(bar => {
+      bar.addEventListener('mouseenter', () => {
+        tip.textContent = `${bar.dataset.date}: ${bar.dataset.dur}`;
+        tip.style.display='block';
+        tip.style.left=(bar.offsetLeft+bar.offsetWidth/2)+'px';
+      });
+      bar.addEventListener('mouseleave', () => { tip.style.display='none'; });
+    });
   });
 }
 
@@ -265,6 +273,7 @@ function initUI() {
   document.getElementById('logoutBtn').textContent = 'logout (' + ME + ')';
   updateQuote();
   buildTGrids(); // builds style grid + color grids
+  loadTodos();
   const qb = document.getElementById('qbar'); if(qb) qb.style.visibility = settings.quotes ? 'visible' : 'hidden';
   document.getElementById('tog-quotes').classList.toggle('on', settings.quotes);
   // populate saved config
@@ -436,7 +445,7 @@ window.saveEdit = async function() {
   showToast('post updated ✓');
 };
 window.confirmDelete = async function(key) {
-  if (!confirm('delete this post?')) return;
+  if (!await showConfirmModal('delete this post?', 'This cannot be undone.')) return;
   await remove(ref(db, `posts/${ME}/${key}`));
 
   // recalculate streak from remaining posts
@@ -534,6 +543,8 @@ function buildHmap(user, days) {
   if (!grid) return;
   const posts = Object.values(allPosts[user] || {});
   const postDates = new Set(posts.map(p => p.date));
+  const postCounts = {};
+  posts.forEach(p => { postCounts[p.date] = (postCounts[p.date]||0)+1; });
   const dp = daysPer[user];
   grid.innerHTML = '';
   grid.style.display = 'flex';
@@ -541,15 +552,23 @@ function buildHmap(user, days) {
   grid.style.gap = '3px';
   const today = new Date();
   const totalSquares = Math.ceil(days / dp);
+  // Shared tooltip
+  let hmapTip = document.getElementById('hmapTip_'+user);
+  if (!hmapTip) {
+    hmapTip = document.createElement('div');
+    hmapTip.id = 'hmapTip_'+user;
+    hmapTip.style.cssText='display:none;position:fixed;background:rgba(4,8,18,0.97);border:1px solid rgba(0,255,200,0.25);padding:3px 9px;font-family:Space Mono,monospace;font-size:8px;color:#e0f5ef;border-radius:3px;white-space:nowrap;z-index:9000;pointer-events:none';
+    document.body.appendChild(hmapTip);
+  }
   for (let i = totalSquares - 1; i >= 0; i--) {
-    let hasPost = false, isToday = false, titleDates = [];
+    let hasPost = false, isToday = false, titleDates = [], totalCnt = 0;
     for (let j = 0; j < dp; j++) {
       const dayAgo = i * dp + j;
       const d = new Date(today);
       d.setDate(today.getDate() - dayAgo);
       const ds = d.toLocaleDateString([], {day:'numeric', month:'short'});
       titleDates.push(ds);
-      if (postDates.has(ds)) hasPost = true;
+      if (postDates.has(ds)) { hasPost = true; totalCnt += postCounts[ds]||0; }
       if (dayAgo === 0) isToday = true;
     }
     const cell = document.createElement('div');
@@ -559,7 +578,6 @@ function buildHmap(user, days) {
     cell.style.flexShrink = '0';
     cell.style.cursor = 'default';
     cell.style.transition = 'all 0.15s';
-    cell.title = titleDates.join(' – ');
     if (hasPost) {
       cell.style.border = `1px solid var(--${col}-brd2)`;
       cell.style.background = `var(--${col}-accl)`;
@@ -571,6 +589,10 @@ function buildHmap(user, days) {
       cell.style.border = '1px solid rgba(255,255,255,0.07)';
       cell.style.background = 'rgba(255,255,255,0.03)';
     }
+    const tipLabel = titleDates.join(' – ') + (hasPost ? ` · ${totalCnt} post${totalCnt!==1?'s':''}` : ' · missed');
+    cell.addEventListener('mouseenter', e => { hmapTip.textContent=tipLabel; hmapTip.style.display='block'; hmapTip.style.left=(e.clientX+10)+'px'; hmapTip.style.top=(e.clientY-26)+'px'; });
+    cell.addEventListener('mousemove', e => { hmapTip.style.left=(e.clientX+10)+'px'; hmapTip.style.top=(e.clientY-26)+'px'; });
+    cell.addEventListener('mouseleave', () => { hmapTip.style.display='none'; });
     grid.appendChild(cell);
   }
 }
@@ -649,18 +671,7 @@ window.makePost = async function() {
   clearImg();
   // Ask time spent if no session was running
   if (!sessionActive && !pendingPostAfterSession) {
-    setTimeout(() => {
-      const mins = prompt('⏱ How long did you work on this today? (minutes, or leave blank to skip)');
-      if (mins && !isNaN(parseInt(mins))) {
-        const ms = parseInt(mins) * 60000;
-        // Save as a quick session
-        const sid = Date.now();
-        import("https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js").then(({ref, push}) => {
-          try { push(ref(db, `sessions/${ME}`), {ts: sid, duration: ms, log: 1, user: ME, date: new Date().toLocaleDateString([],{day:'numeric',month:'short'})}); updateSessionStatsUI(); } catch(e) {}
-        }).catch(()=>{});
-        showToast(`⏱ logged ${mins}min work session`);
-      }
-    }, 800);
+    setTimeout(() => { showTimeInputModal(); }, 800);
   }
   pendingPostAfterSession = false;
   // Push to Firebase
@@ -711,9 +722,7 @@ window.goTab = function(tab) {
     document.body.classList.add('on-home');
     renderHomeWidgets();
     startHomeClock();
-    // populate quote
-    const hq = document.getElementById('homeQuote');
-    if (hq) hq.textContent = '"' + QUOTES[Math.floor(Math.random()*QUOTES.length)] + '"';
+    renderTodos();
   } else {
     document.body.classList.remove('on-home');
   }
@@ -832,19 +841,23 @@ function buildHomeBarChart(containerId) {
   const frPosts = Object.values(allPosts[FRIEND()]||{});
   const today = new Date();
   const days = 14;
-  const labels=[], myD=[], frD=[];
+  const labels=[], myD=[], frD=[], fullDates=[];
   for(let i=days-1;i>=0;i--){
     const d=new Date(today); d.setDate(today.getDate()-i);
     const ds=d.toLocaleDateString([],{day:'numeric',month:'short'});
+    fullDates.push(ds);
     labels.push(i===0?'today':i===1?'yday':d.toLocaleDateString([],{weekday:'short'}));
     myD.push(myPosts.filter(p=>p.date===ds).length);
     frD.push(frPosts.filter(p=>p.date===ds).length);
   }
   const max=Math.max(1,...myD,...frD);
-  c.innerHTML = `<div style="display:flex;align-items:flex-end;gap:2px;height:50px;padding:0 2px">` +
+  const tooltipId = containerId+'_tip';
+  c.style.position='relative';
+  c.innerHTML = `<div id="${tooltipId}" style="display:none;position:absolute;top:-32px;left:50%;transform:translateX(-50%);background:rgba(4,8,18,0.97);border:1px solid rgba(0,255,200,0.25);padding:4px 10px;font-family:Space Mono,monospace;font-size:8px;color:#e0f5ef;border-radius:3px;white-space:nowrap;z-index:100;pointer-events:none"></div>` +
+    `<div style="display:flex;align-items:flex-end;gap:2px;height:50px;padding:0 2px">` +
     labels.map((l,i)=>{
       const h1=Math.round((myD[i]/max)*44)+2, h2=Math.round((frD[i]/max)*44)+2;
-      return `<div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:1px;position:relative" title="${l}: you ${myD[i]}, friend ${frD[i]}">
+      return `<div class="hbar-col" data-label="${fullDates[i]}" data-me="${myD[i]}" data-fr="${frD[i]}" style="flex:1;display:flex;flex-direction:column;align-items:center;gap:1px;position:relative;cursor:default">
         <div style="width:100%;display:flex;gap:1px;align-items:flex-end;height:46px">
           <div style="flex:1;height:${h1}px;background:${myD[i]>0?'var(--u1-accl)':'rgba(255,255,255,0.04)'};border-radius:1px 1px 0 0;border:${myD[i]>0?'1px solid var(--u1-brd2)':'1px solid rgba(255,255,255,0.04)'}"></div>
           <div style="flex:1;height:${h2}px;background:${frD[i]>0?'var(--u2-accl)':'rgba(255,255,255,0.04)'};border-radius:1px 1px 0 0;border:${frD[i]>0?'1px solid var(--u2-brd2)':'1px solid rgba(255,255,255,0.04)'}"></div>
@@ -855,6 +868,18 @@ function buildHomeBarChart(containerId) {
       <span style="font-family:Space Mono,monospace;font-size:7px;color:var(--u1-acc)">■ me</span>
       <span style="font-family:Space Mono,monospace;font-size:7px;color:var(--u2-acc)">■ friend</span>
     </div>`;
+  // Attach hover events
+  const tip = document.getElementById(tooltipId);
+  c.querySelectorAll('.hbar-col').forEach(col => {
+    col.addEventListener('mouseenter', e => {
+      const lbl=col.dataset.label, me=col.dataset.me, fr=col.dataset.fr;
+      tip.textContent = `${lbl} · me:${me} · friend:${fr}`;
+      const rect=col.getBoundingClientRect(), cRect=c.getBoundingClientRect();
+      tip.style.display='block';
+      tip.style.left = (col.offsetLeft + col.offsetWidth/2)+'px';
+    });
+    col.addEventListener('mouseleave', () => { tip.style.display='none'; });
+  });
 }
 
 // ── FAVORITE APPS ──
@@ -931,14 +956,27 @@ function buildMiniHmap(containerId, user) {
   c.style.display = 'flex';
   c.style.flexWrap = 'wrap';
   c.style.gap = '3px';
+  c.style.position = 'relative';
+  // Tooltip element
+  const tip = document.createElement('div');
+  tip.style.cssText = 'display:none;position:fixed;background:rgba(4,8,18,0.97);border:1px solid rgba(0,255,200,0.25);padding:3px 9px;font-family:Space Mono,monospace;font-size:8px;color:#e0f5ef;border-radius:3px;white-space:nowrap;z-index:9000;pointer-events:none';
+  document.body.appendChild(tip);
   const today = new Date();
   for (let i = 29; i >= 0; i--) {
     const d = new Date(today);
     d.setDate(today.getDate() - i);
     const ds = d.toLocaleDateString([], {day:'numeric', month:'short'});
+    const cnt = posts.filter(p=>p.date===ds).length;
     const cell = document.createElement('div');
     cell.style.cssText = `width:12px;height:12px;border-radius:2px;flex-shrink:0;border:1px solid ${postDates.has(ds) ? 'var(--'+col+'-brd2)' : 'rgba(255,255,255,0.07)'};background:${postDates.has(ds) ? 'var(--'+col+'-accl)' : 'rgba(255,255,255,0.03)'};cursor:default`;
-    cell.title = ds;
+    cell.addEventListener('mouseenter', e => {
+      tip.textContent = `${ds}: ${cnt} post${cnt!==1?'s':''}`;
+      tip.style.display='block';
+      tip.style.left=(e.clientX+10)+'px';
+      tip.style.top=(e.clientY-24)+'px';
+    });
+    cell.addEventListener('mousemove', e => { tip.style.left=(e.clientX+10)+'px'; tip.style.top=(e.clientY-24)+'px'; });
+    cell.addEventListener('mouseleave', () => { tip.style.display='none'; });
     c.appendChild(cell);
   }
 }
@@ -953,11 +991,23 @@ function renderStatsView() {
   const days = Array.from({length:14}, (_,i) => { const d = new Date(today); d.setDate(today.getDate()-(13-i)); return d.toLocaleDateString([],{day:'numeric',month:'short'}); });
   const counts = days.map(ds => myPosts.filter(p => p.date === ds).length);
   const max = Math.max(...counts, 1);
-  chart.innerHTML = '<div style="display:flex;align-items:flex-end;gap:4px;height:70px">' +
+  chart.style.position='relative';
+  const tipId = 'statsPostChartTip';
+  chart.innerHTML = `<div id="${tipId}" style="display:none;position:absolute;top:-28px;background:rgba(4,8,18,0.97);border:1px solid rgba(0,255,200,0.25);padding:3px 9px;font-family:Space Mono,monospace;font-size:8px;color:#e0f5ef;border-radius:3px;white-space:nowrap;z-index:100;pointer-events:none"></div>` +
+    '<div style="display:flex;align-items:flex-end;gap:4px;height:70px">' +
     days.map((ds,i) => {
       const h = Math.round((counts[i]/max)*60)+4;
-      return `<div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:2px"><div style="width:100%;height:${h}px;background:${counts[i]>0?'var(--u1-accl)':'rgba(255,255,255,0.04)'};border:1px solid ${counts[i]>0?'var(--u1-brd2)':'rgba(255,255,255,0.06)'};border-radius:2px;transition:all 0.3s" title="${ds}: ${counts[i]} posts"></div><div style="font-family:Space Mono,monospace;font-size:6px;color:rgba(255,255,255,0.3);transform:rotate(-45deg);transform-origin:center;white-space:nowrap">${ds.split(' ')[0]}</div></div>`;
+      return `<div class="spc-col" data-date="${ds}" data-cnt="${counts[i]}" style="flex:1;display:flex;flex-direction:column;align-items:center;gap:2px;cursor:default"><div style="width:100%;height:${h}px;background:${counts[i]>0?'var(--u1-accl)':'rgba(255,255,255,0.04)'};border:1px solid ${counts[i]>0?'var(--u1-brd2)':'rgba(255,255,255,0.06)'};border-radius:2px;transition:all 0.3s"></div><div style="font-family:Space Mono,monospace;font-size:6px;color:rgba(255,255,255,0.3);transform:rotate(-45deg);transform-origin:center;white-space:nowrap">${ds.split(' ')[0]}</div></div>`;
     }).join('') + '</div>';
+  const tip2 = document.getElementById(tipId);
+  chart.querySelectorAll('.spc-col').forEach(col => {
+    col.addEventListener('mouseenter', () => {
+      tip2.textContent = `${col.dataset.date}: ${col.dataset.cnt} post${col.dataset.cnt!=1?'s':''}`;
+      tip2.style.display='block';
+      tip2.style.left=(col.offsetLeft+col.offsetWidth/2)+'px';
+    });
+    col.addEventListener('mouseleave', () => { tip2.style.display='none'; });
+  });
 }
 
 
@@ -1932,6 +1982,99 @@ function showToast(msg) {
   document.body.appendChild(t);
   setTimeout(() => { if (t) t.remove(); }, 3000);
 }
+
+// ── IN-APP CONFIRM MODAL ──
+function showConfirmModal(title, sub) {
+  return new Promise(resolve => {
+    const m = document.createElement('div');
+    m.style.cssText='position:fixed;inset:0;z-index:9500;background:rgba(0,0,0,0.75);display:flex;align-items:center;justify-content:center;backdrop-filter:blur(4px)';
+    m.innerHTML=`<div style="background:#040810;border:1px solid var(--u1-brd2);border-radius:6px;padding:22px;width:320px;max-width:95vw;box-shadow:0 0 40px rgba(0,0,0,0.8)">
+      <div style="font-family:Orbitron,monospace;font-size:11px;font-weight:700;color:var(--u1-acc);letter-spacing:0.12em;margin-bottom:8px">${title}</div>
+      ${sub?`<div style="font-family:Space Mono,monospace;font-size:9px;color:rgba(255,255,255,0.45);margin-bottom:16px">${sub}</div>`:''}
+      <div style="display:flex;gap:8px;margin-top:12px">
+        <button id="cmYes" style="flex:1;background:rgba(255,80,80,0.1);border:1px solid rgba(255,80,80,0.4);color:rgba(255,80,80,0.9);font-family:Orbitron,monospace;font-size:9px;font-weight:700;padding:10px;cursor:pointer;border-radius:3px;letter-spacing:0.1em">CONFIRM</button>
+        <button id="cmNo" style="flex:1;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.1);color:rgba(255,255,255,0.5);font-family:Orbitron,monospace;font-size:9px;font-weight:700;padding:10px;cursor:pointer;border-radius:3px;letter-spacing:0.1em">CANCEL</button>
+      </div></div>`;
+    document.body.appendChild(m);
+    m.querySelector('#cmYes').onclick=()=>{m.remove();resolve(true);};
+    m.querySelector('#cmNo').onclick=()=>{m.remove();resolve(false);};
+    m.addEventListener('click',e=>{if(e.target===m){m.remove();resolve(false);}});
+  });
+}
+
+// ── IN-APP TIME INPUT MODAL ──
+function showTimeInputModal() {
+  const m = document.createElement('div');
+  m.style.cssText='position:fixed;inset:0;z-index:9500;background:rgba(0,0,0,0.75);display:flex;align-items:center;justify-content:center;backdrop-filter:blur(4px)';
+  m.innerHTML=`<div style="background:#040810;border:1px solid var(--u1-brd2);border-radius:6px;padding:22px;width:320px;max-width:95vw;box-shadow:0 0 40px rgba(0,0,0,0.8)">
+    <div style="font-family:Orbitron,monospace;font-size:10px;font-weight:700;color:var(--u1-acc);letter-spacing:0.12em;margin-bottom:4px">⏱ LOG WORK TIME</div>
+    <div style="font-family:Space Mono,monospace;font-size:9px;color:rgba(255,255,255,0.4);margin-bottom:14px">how long did you work? (minutes)</div>
+    <input id="timeInp" placeholder="e.g. 45" type="number" min="1" style="width:100%;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.12);color:#e0f5ef;font-family:Space Mono,monospace;font-size:12px;padding:9px 13px;border-radius:3px;outline:none;margin-bottom:12px">
+    <div style="display:flex;gap:8px">
+      <button id="tiLog" style="flex:1;background:var(--u1-acc);color:#000;font-family:Orbitron,monospace;font-size:9px;font-weight:700;padding:10px;border:none;cursor:pointer;border-radius:3px;letter-spacing:0.1em">LOG</button>
+      <button id="tiSkip" style="flex:1;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.1);color:rgba(255,255,255,0.45);font-family:Orbitron,monospace;font-size:9px;font-weight:700;padding:10px;cursor:pointer;border-radius:3px;letter-spacing:0.1em">SKIP</button>
+    </div></div>`;
+  document.body.appendChild(m);
+  const inp=m.querySelector('#timeInp');
+  inp.focus();
+  const doLog=()=>{
+    const mins=parseInt(inp.value);
+    if(mins>0){
+      const ms=mins*60000;
+      import("https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js").then(({ref,push})=>{
+        try{push(ref(db,`sessions/${ME}`),{ts:Date.now(),duration:ms,log:1,user:ME,date:new Date().toLocaleDateString([],{day:'numeric',month:'short'})});updateSessionStatsUI();}catch(e){}
+      }).catch(()=>{});
+      showToast(`⏱ logged ${mins}min work session`);
+    }
+    m.remove();
+  };
+  m.querySelector('#tiLog').onclick=doLog;
+  m.querySelector('#tiSkip').onclick=()=>m.remove();
+  inp.addEventListener('keydown',e=>{if(e.key==='Enter')doLog();});
+  m.addEventListener('click',e=>{if(e.target===m)m.remove();});
+}
+
+// ── SESSION COMPLETE MODAL ──
+function showSessionCompleteModal(elapsed) {
+  const m = document.createElement('div');
+  m.style.cssText='position:fixed;inset:0;z-index:9500;background:rgba(0,0,0,0.75);display:flex;align-items:center;justify-content:center;backdrop-filter:blur(4px)';
+  m.innerHTML=`<div style="background:#040810;border:1px solid var(--u1-brd2);border-radius:6px;padding:22px;width:320px;max-width:95vw;box-shadow:0 0 40px rgba(0,0,0,0.8);text-align:center">
+    <div style="font-family:Orbitron,monospace;font-size:12px;font-weight:700;color:var(--u1-acc);letter-spacing:0.12em;margin-bottom:6px">📸 SESSION COMPLETE</div>
+    <div style="font-family:Orbitron,monospace;font-size:22px;font-weight:900;color:#fff;margin-bottom:4px">${fmtTime(elapsed)}</div>
+    <div style="font-family:Space Mono,monospace;font-size:9px;color:rgba(255,255,255,0.4);margin-bottom:16px">want to log a post?</div>
+    <div style="display:flex;gap:8px">
+      <button id="scYes" style="flex:1;background:var(--u1-acc);color:#000;font-family:Orbitron,monospace;font-size:9px;font-weight:700;padding:10px;border:none;cursor:pointer;border-radius:3px;letter-spacing:0.1em">✍ LOG POST</button>
+      <button id="scNo" style="flex:1;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.1);color:rgba(255,255,255,0.45);font-family:Orbitron,monospace;font-size:9px;font-weight:700;padding:10px;cursor:pointer;border-radius:3px;letter-spacing:0.1em">SKIP</button>
+    </div></div>`;
+  document.body.appendChild(m);
+  m.querySelector('#scYes').onclick=()=>{m.remove();goTab('feed');setTimeout(()=>document.getElementById('pinp1').focus(),100);};
+  m.querySelector('#scNo').onclick=()=>m.remove();
+  m.addEventListener('click',e=>{if(e.target===m)m.remove();});
+}
+
+// ── TO-DO LIST ──
+let todos = [];
+function loadTodos(){try{const d=localStorage.getItem('epoch_todos_'+ME);if(d)todos=JSON.parse(d);}catch(e){todos=[];}}
+function saveTodos(){try{localStorage.setItem('epoch_todos_'+ME,JSON.stringify(todos));}catch(e){}}
+function renderTodos(){
+  const c=document.getElementById('todoList');if(!c)return;
+  if(!todos.length){c.innerHTML='<div style="font-family:Space Mono,monospace;font-size:8px;color:rgba(255,255,255,0.2);text-align:center;padding:10px">no tasks — add one above</div>';return;}
+  c.innerHTML=todos.map((t,i)=>`<div style="display:flex;align-items:center;gap:8px;padding:6px 8px;background:${t.done?'rgba(0,255,200,0.04)':'rgba(255,255,255,0.02)'};border:1px solid ${t.done?'var(--u1-brd)':'rgba(255,255,255,0.06)'};border-radius:3px;margin-bottom:4px">
+    <div onclick="toggleTodo(${i})" style="width:14px;height:14px;border-radius:3px;border:1px solid ${t.done?'var(--u1-acc)':'rgba(255,255,255,0.2)'};background:${t.done?'var(--u1-accl)':'transparent'};cursor:pointer;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:9px">${t.done?'✓':''}</div>
+    <span style="flex:1;font-family:Space Mono,monospace;font-size:9px;color:${t.done?'rgba(255,255,255,0.3)':'rgba(255,255,255,0.8)'};text-decoration:${t.done?'line-through':'none'};line-height:1.4">${t.text}</span>
+    <button onclick="deleteTodo(${i})" style="background:none;border:none;color:rgba(255,80,80,0.4);cursor:pointer;font-size:11px;padding:0 2px;line-height:1">✕</button>
+  </div>`).join('');
+}
+window.toggleTodo=function(i){todos[i].done=!todos[i].done;saveTodos();renderTodos();};
+window.deleteTodo=function(i){todos.splice(i,1);saveTodos();renderTodos();};
+window.addTodo=function(){
+  const inp=document.getElementById('todoInp');if(!inp)return;
+  const txt=inp.value.trim();if(!txt)return;
+  todos.push({text:txt,done:false});
+  inp.value='';
+  saveTodos();renderTodos();
+};
+
 </script>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
@@ -2857,10 +3000,17 @@ body.on-home .taskbar{display:none!important}
         <div id="homeRecentPosts"></div>
       </div>
 
-      <!-- QUOTE — spans 6 cols -->
-      <div style="grid-column:span 6;background:rgba(255,255,255,0.01);border:1px solid rgba(255,255,255,0.05);border-radius:4px;padding:12px;display:flex;flex-direction:column;justify-content:center;position:relative;overflow:hidden">
+      <!-- TO-DO LIST — spans 6 cols -->
+      <div style="grid-column:span 6;background:rgba(255,255,255,0.01);border:1px solid rgba(255,255,255,0.07);border-radius:4px;padding:12px;position:relative;overflow:hidden">
         <div style="position:absolute;left:0;top:0;bottom:0;width:2px;background:var(--u1-acc);opacity:0.4"></div>
-        <div style="font-family:Rajdhani,sans-serif;font-size:13px;font-style:italic;color:rgba(255,255,255,0.55);line-height:1.6;padding-left:10px" id="homeQuote"></div>
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+          <div style="font-family:Orbitron,monospace;font-size:7px;font-weight:700;color:rgba(255,255,255,0.4);letter-spacing:0.15em">✅ TO-DO</div>
+        </div>
+        <div style="display:flex;gap:6px;margin-bottom:8px">
+          <input id="todoInp" placeholder="add a task..." onkeydown="if(event.key==='Enter')addTodo()" style="flex:1;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.1);color:#e0f5ef;font-family:Space Mono,monospace;font-size:10px;padding:6px 10px;border-radius:2px;outline:none">
+          <button onclick="addTodo()" style="background:var(--u1-acc);color:#000;font-family:Orbitron,monospace;font-size:7px;font-weight:700;padding:6px 10px;border:none;cursor:pointer;border-radius:2px;letter-spacing:0.06em">ADD</button>
+        </div>
+        <div id="todoList" style="max-height:120px;overflow-y:auto"></div>
       </div>
 
     </div>
