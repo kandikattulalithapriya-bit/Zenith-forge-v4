@@ -25,7 +25,18 @@ const db = getDatabase(app);
 
 const USERS = ['Monish','Prashanth'];
 let ME = '';
-const EMOJIS = ['🔥','💀','⚡','🫡','👁️','🏆','🎯','💎','🚀','⚔️','🧠','💪','🌑','🦾','✅'];
+const EMOJIS = [
+  // Row 1 — always visible (6)
+  '🔥','💀','⚡','🫡','👁️','🏆',
+  // Row 2 — shown on expand
+  '📈','🎯','💎','🚀','⚔️','🧠',
+  '💪','🌑','🦾','✅','🥷','🏹',
+  '👊','🫀','🩸','🌊','🦅','🐉',
+  '☠️','🔱','⚙️','🛡️','🎖️','🌙',
+  '💥','🌀','🔮','🧬','⚗️','🏋️',
+  '🎴','🃏','🎲','🌟','💫','🔴',
+  '🟢','🔵','🟣','🟠','⬛','🖤',
+];
 const QUOTES = [
   // Bhagavad Gita
   "You have a right to perform your prescribed duties, but you are not entitled to the fruits of your actions. — Bhagavad Gita 2.47",
@@ -344,31 +355,36 @@ function mkCard(p, key, user) {
   const imgH = p.img
     ? `<div class="pimg-wrap"><img src="${p.img}" loading="lazy"></div>`
     : `<div class="pimg-none">[ no image ]</div>`;
+
   const VISIBLE_EMOJIS = EMOJIS.slice(0, 6);
   const EXTRA_EMOJIS = EMOJIS.slice(6);
-  const rxH = VISIBLE_EMOJIS.map(e => {
-    const cnt = (p.reactions && p.reactions[e]) || 0;
-    const lit = p.reactions && p.reactions[e + '_' + ME] ? true : false;
-    return `<div class="rxn${lit?' lit':''}" data-key="${key}" data-user="${user}" data-emoji="${e}">${e}<span class="rxn-n">${cnt||''}</span></div>`;
-  }).join('');
-  const rxExtraH = EXTRA_EMOJIS.map(e => {
-    const cnt = (p.reactions && p.reactions[e]) || 0;
-    const lit = p.reactions && p.reactions[e + '_' + ME] ? true : false;
-    return `<div class="rxn${lit?' lit':''}" data-key="${key}" data-user="${user}" data-emoji="${e}">${e}<span class="rxn-n">${cnt||''}</span></div>`;
-  }).join('');
   const extraId = `rxnExtra-${user}-${key}`;
+
+  function mkRxnEl(e) {
+    const cnt = (p.reactions && p.reactions[e]) || 0;
+    const lit = p.reactions && p.reactions[e + '_' + ME] ? true : false;
+    return `<div class="rxn${lit?' lit':''}" data-key="${key}" data-user="${user}" data-emoji="${e}">${e}<span class="rxn-n">${cnt||''}</span></div>`;
+  }
+
+  const rxH = VISIBLE_EMOJIS.map(mkRxnEl).join('');
+  const rxExtraH = EXTRA_EMOJIS.map(mkRxnEl).join('');
+
   const ownControls = user === ME
     ? `<div class="post-controls">
         <button class="post-ctrl-btn edit-btn" data-key="${key}">✎ edit</button>
         <button class="post-ctrl-btn del-btn" data-key="${key}">✕ delete</button>
        </div>`
     : '';
+
   div.innerHTML = `
     <div class="phead"><span class="pday">day ${p.day}</span><span class="ptime">${p.time} · ${p.date}</span>${ownControls}</div>
     ${imgH}
     <div class="pbody">
       <div class="ptxt">${p.text}</div>
-      <div class="rxns">${rxH}</div>
+      <div class="rxns-wrap">
+        <div class="rxns">${rxH}<button class="rxn-more-btn" data-extra="${extraId}" title="more reactions">+${EXTRA_EMOJIS.length} more</button></div>
+        <div class="rxns rxns-extra" id="${extraId}" style="display:none">${rxExtraH}</div>
+      </div>
       <button class="cmt-btn" data-key="${key}" data-user="${user}">💬 <span class="cmt-count" id="cmtc-${user}-${key}">0</span></button>
     </div>
     <div class="inline-cmt" id="icmt-${user}-${key}" style="display:none">
@@ -380,7 +396,20 @@ function mkCard(p, key, user) {
         <button class="icmt-send" onclick="sendInlineComment('${key}','${user}')">↵</button>
       </div>
     </div>`;
+
+  // reaction clicks — both visible and extra rows
   div.querySelectorAll('.rxn').forEach(el => el.addEventListener('click', () => doRxn(el.dataset.key, el.dataset.user, el.dataset.emoji)));
+
+  // "more" toggle
+  div.querySelector('.rxn-more-btn').addEventListener('click', function() {
+    const extraEl = document.getElementById(this.dataset.extra);
+    if (!extraEl) return;
+    const open = extraEl.style.display !== 'none';
+    extraEl.style.display = open ? 'none' : 'flex';
+    this.textContent = open ? `+${EXTRA_EMOJIS.length} more` : '▲ less';
+    this.classList.toggle('open', !open);
+  });
+
   div.querySelector('.cmt-btn').addEventListener('click', () => toggleInlineComments(key, user));
   if (user === ME) {
     div.querySelector('.edit-btn').addEventListener('click', () => openEditModal(key, p));
@@ -2456,6 +2485,13 @@ body.ui-glass .taskbar,body.u1-glass .taskbar,body.u2-glass .taskbar{background:
 
 /* ── HOME CLOCK ANIMATION ── */
 @keyframes clockPulse{0%,100%{text-shadow:0 0 20px var(--u1-acc),0 0 40px var(--u1-acc)}50%{text-shadow:0 0 30px var(--u1-acc),0 0 70px var(--u1-acc),0 0 100px var(--u1-acc)}}
+
+/* ── EMOJI DRAWER ── */
+.rxns-wrap{display:flex;flex-direction:column;gap:4px}
+.rxns-extra{flex-wrap:wrap;gap:4px;padding:6px 0 2px;border-top:1px solid rgba(255,255,255,0.06);animation:fadeup 0.2s ease}
+.rxn-more-btn{font-family:'Space Mono',monospace;font-size:8px;color:rgba(255,255,255,0.35);background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);padding:2px 7px;border-radius:10px;cursor:pointer;transition:all 0.15s;white-space:nowrap;flex-shrink:0}
+.rxn-more-btn:hover{color:var(--u1-acc);border-color:var(--u1-brd2);background:var(--u1-acc2)}
+.rxn-more-btn.open{color:var(--u1-acc);border-color:var(--u1-brd2)}
 
 /* ── FAV APPS ── */
 .fav-app-item{display:flex;flex-direction:column;align-items:center;gap:3px;padding:6px 8px;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.07);border-radius:4px;text-decoration:none;color:inherit;cursor:pointer;transition:all 0.15s;min-width:52px}
