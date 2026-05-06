@@ -25,7 +25,7 @@ const db = getDatabase(app);
 
 const USERS = ['Monish','Prashanth'];
 let ME = '';
-const EMOJIS = ['🔥','💀','⚡','🫡','👁️','🏆','📈','💪','🧠','⚔️','🎯','🛡️','🌙','☀️','🌊','🏋️','💯','🚀','⭐','🦾','📊','🥷','🔮','🌑','🎖️','💎','🩸','🫀','🌪️','🕹️'];
+const EMOJIS = ['🔥','💀','⚡','🫡','👁️','🏆','🎯','💎','🚀','⚔️','🧠','💪','🌑','🦾','✅'];
 const QUOTES = [
   // Bhagavad Gita
   "You have a right to perform your prescribed duties, but you are not entitled to the fruits of your actions. — Bhagavad Gita 2.47",
@@ -75,6 +75,123 @@ const UI_STYLES = [
 let wheelState = { u1: '#00ffc8', u2: '#ff00cc' };
 
 const APP_VERSION = 'v26';
+// ── SESSION RECORDING STATE ──
+let sessionActive = false;
+let sessionPaused = false;
+let sessionStart = null;
+let sessionPauseStart = null;
+let sessionPausedMs = 0;
+let sessionTimer = null;
+let sessionLog = []; // [{action, ts}]
+let pendingPostAfterSession = false;
+
+function getSessionElapsed() {
+  if (!sessionStart) return 0;
+  const now = Date.now();
+  let elapsed = now - sessionStart - sessionPausedMs;
+  if (sessionPaused && sessionPauseStart) elapsed -= (now - sessionPauseStart);
+  return Math.max(0, elapsed);
+}
+function fmtTime(ms) {
+  const s = Math.floor(ms/1000);
+  const m = Math.floor(s/60);
+  const h = Math.floor(m/60);
+  return h ? `${h}h ${m%60}m ${s%60}s` : m ? `${m}m ${s%60}s` : `${s}s`;
+}
+
+window.startSession = function() {
+  if (sessionActive) return;
+  sessionActive = true; sessionPaused = false;
+  sessionStart = Date.now(); sessionPausedMs = 0; sessionLog = [];
+  sessionLog.push({action:'started', ts: Date.now()});
+  updateSessionUI();
+  sessionTimer = setInterval(updateSessionUI, 1000);
+  showToast('🎬 session started');
+  // Show session widget on home
+  const sw = document.getElementById('sessionWidget');
+  if (sw) sw.classList.add('active');
+};
+
+window.pauseSession = function() {
+  if (!sessionActive) return;
+  if (!sessionPaused) {
+    sessionPaused = true; sessionPauseStart = Date.now();
+    sessionLog.push({action:'paused', ts: Date.now()});
+    showToast('⏸ session paused');
+  } else {
+    sessionPausedMs += Date.now() - sessionPauseStart;
+    sessionPaused = false; sessionPauseStart = null;
+    sessionLog.push({action:'resumed', ts: Date.now()});
+    showToast('▶ session resumed');
+  }
+  updateSessionUI();
+};
+
+window.stopSession = function() {
+  if (!sessionActive) return;
+  clearInterval(sessionTimer);
+  sessionLog.push({action:'stopped', ts: Date.now()});
+  const elapsed = getSessionElapsed();
+  sessionActive = false; sessionPaused = false;
+  updateSessionUI();
+  const sw = document.getElementById('sessionWidget');
+  if (sw) sw.classList.remove('active');
+  showToast(`✅ session ended: ${fmtTime(elapsed)}`);
+  // Save session to Firebase
+  const sid = Date.now();
+  import("https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js").then(({ref, push, update}) => {
+    try {
+      push(ref(db, `sessions/${ME}`), {ts: sid, duration: elapsed, log: sessionLog.length, user: ME, date: new Date().toLocaleDateString([], {day:'numeric', month:'short'})});
+      updateSessionStatsUI();
+    } catch(e){}
+  }).catch(()=>{});
+  // Ask to post
+  setTimeout(() => {
+    if (confirm('📸 Session complete! Want to log a post now?')) {
+      document.getElementById('pinp1').focus();
+    }
+  }, 500);
+};
+
+function updateSessionUI() {
+  const elapsed = sessionActive ? getSessionElapsed() : 0;
+  const el = document.getElementById('sessionTime');
+  if (el) el.textContent = fmtTime(elapsed);
+  const btn = document.getElementById('sessionPauseBtn');
+  if (btn) btn.textContent = sessionPaused ? '▶ RESUME' : '⏸ PAUSE';
+  const dot = document.getElementById('sessionDot');
+  if (dot) { dot.style.background = sessionActive ? (sessionPaused ? '#ffaa00' : '#00ffc8') : 'rgba(255,255,255,0.2)'; dot.style.boxShadow = sessionActive && !sessionPaused ? '0 0 8px #00ffc8' : 'none'; }
+}
+
+// Session stats rendering
+let allSessions = {Monish:[], Prashanth:[]};
+function listenSessions() {
+  import("https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js").then(({ref, onValue}) => {
+    try {
+      onValue(ref(db, 'sessions'), snap => {
+        const d = snap.val() || {};
+        allSessions = {Monish: Object.values(d.Monish||{}), Prashanth: Object.values(d.Prashanth||{})};
+        updateSessionStatsUI();
+      });
+    } catch(e) {}
+  }).catch(()=>{});
+}
+function updateSessionStatsUI() {
+  ['statsSessionChart', 'statsSessionChart2'].forEach(id => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    const mine = allSessions[ME] || [];
+    const last7 = mine.slice(-7);
+    if (!last7.length) { el.innerHTML = '<div style="text-align:center;padding:20px;font-family:Space Mono,monospace;font-size:9px;color:rgba(255,255,255,0.3)">no sessions yet — use 🎬 on home to record</div>'; return; }
+    const maxDur = Math.max(...last7.map(s => s.duration || 0)) || 1;
+    el.innerHTML = '<div style="display:flex;align-items:flex-end;gap:6px;height:80px;padding:0 4px">' +
+      last7.map((s,i) => {
+        const h = Math.round((s.duration / maxDur) * 70) + 10;
+        return `<div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:3px"><div style="width:100%;height:${h}px;background:var(--u1-accl);border:1px solid var(--u1-brd2);border-radius:2px;transition:all 0.3s" title="${fmtTime(s.duration||0)}"></div><div style="font-family:Space Mono,monospace;font-size:7px;color:rgba(255,255,255,0.4)">${s.date||''}</div></div>`;
+      }).join('') + '</div>';
+  });
+}
+
 let imgData = null;
 let allPosts = { Monish: {}, Prashanth: {} };
 let streaks = { Monish: 0, Prashanth: 0 };
@@ -140,6 +257,8 @@ function initUI() {
   const qb = document.getElementById('qbar'); if(qb) qb.style.visibility = settings.quotes ? 'visible' : 'hidden';
   document.getElementById('tog-quotes').classList.toggle('on', settings.quotes);
   // populate saved config
+  // Start on home tab
+  setTimeout(() => { goTab('home'); listenSessions(); updateSessionUI(); }, 100);
   // telegram configured internally
   if (settings.driveUrl) document.getElementById('driveUrlInp').value = settings.driveUrl;
 }
@@ -201,6 +320,9 @@ function updateQuote() {
 function renderFeed() {
   renderCol(ME, 'feedCont1');
   renderCol(FRIEND(), 'feedCont2');
+  // Update home widgets if on home
+  const hv = document.getElementById('homeView');
+  if (hv && hv.style.display !== 'none') renderHomeWidgets();
 }
 
 function renderCol(user, containerId) {
@@ -222,11 +344,19 @@ function mkCard(p, key, user) {
   const imgH = p.img
     ? `<div class="pimg-wrap"><img src="${p.img}" loading="lazy"></div>`
     : `<div class="pimg-none">[ no image ]</div>`;
-  const rxH = EMOJIS.map(e => {
+  const VISIBLE_EMOJIS = EMOJIS.slice(0, 6);
+  const EXTRA_EMOJIS = EMOJIS.slice(6);
+  const rxH = VISIBLE_EMOJIS.map(e => {
     const cnt = (p.reactions && p.reactions[e]) || 0;
     const lit = p.reactions && p.reactions[e + '_' + ME] ? true : false;
     return `<div class="rxn${lit?' lit':''}" data-key="${key}" data-user="${user}" data-emoji="${e}">${e}<span class="rxn-n">${cnt||''}</span></div>`;
   }).join('');
+  const rxExtraH = EXTRA_EMOJIS.map(e => {
+    const cnt = (p.reactions && p.reactions[e]) || 0;
+    const lit = p.reactions && p.reactions[e + '_' + ME] ? true : false;
+    return `<div class="rxn${lit?' lit':''}" data-key="${key}" data-user="${user}" data-emoji="${e}">${e}<span class="rxn-n">${cnt||''}</span></div>`;
+  }).join('');
+  const extraId = `rxnExtra-${user}-${key}`;
   const ownControls = user === ME
     ? `<div class="post-controls">
         <button class="post-ctrl-btn edit-btn" data-key="${key}">✎ edit</button>
@@ -488,6 +618,22 @@ window.makePost = async function() {
   };
   document.getElementById('pinp1').value = '';
   clearImg();
+  // Ask time spent if no session was running
+  if (!sessionActive && !pendingPostAfterSession) {
+    setTimeout(() => {
+      const mins = prompt('⏱ How long did you work on this today? (minutes, or leave blank to skip)');
+      if (mins && !isNaN(parseInt(mins))) {
+        const ms = parseInt(mins) * 60000;
+        // Save as a quick session
+        const sid = Date.now();
+        import("https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js").then(({ref, push}) => {
+          try { push(ref(db, `sessions/${ME}`), {ts: sid, duration: ms, log: 1, user: ME, date: new Date().toLocaleDateString([],{day:'numeric',month:'short'})}); updateSessionStatsUI(); } catch(e) {}
+        }).catch(()=>{});
+        showToast(`⏱ logged ${mins}min work session`);
+      }
+    }, 800);
+  }
+  pendingPostAfterSession = false;
   // Push to Firebase
   await push(ref(db, `posts/${ME}`), post);
   await update(ref(db, 'streaks'), {
@@ -506,227 +652,9 @@ window.makePost = async function() {
   }
 };
 
-// ── HOME / IRON MAN UI ──
-let sessionActive = false;
-let sessionStart = null;
-let sessionTimer = null;
-let sessionLog = [];
-
-function renderHome() {
-  const myPosts = Object.values(allPosts[ME] || {});
-  const frPosts = Object.values(allPosts[FRIEND()] || {});
-  const myStreak = streaks[ME] || 0;
-  const frStreak = streaks[FRIEND()] || 0;
-  const myMax = myPosts.length ? Math.max(...myPosts.map(p=>p.day||0)) : 0;
-  const myWeek = myPosts.filter(p => {
-    const d = new Date(p.ts); const now = new Date();
-    return (now - d) < 7*24*3600*1000;
-  }).length;
-  const frWeek = frPosts.filter(p => {
-    const d = new Date(p.ts); const now = new Date();
-    return (now - d) < 7*24*3600*1000;
-  }).length;
-
-  // load session log from localStorage
-  try { sessionLog = JSON.parse(localStorage.getItem('epoch_sessions_'+ME) || '[]'); } catch(e){ sessionLog=[]; }
-
-  const totalSessionMins = sessionLog.reduce((a,s)=>a+(s.dur||0),0);
-  const todayStr = new Date().toISOString().slice(0,10);
-  const todaySessions = sessionLog.filter(s=>s.date===todayStr);
-  const todayMins = todaySessions.reduce((a,s)=>a+(s.dur||0),0);
-
-  const acc = (settings.u1Hex && ME==='Monish') ? settings.u1Hex : (settings.u2Hex||'#ff00cc');
-
-  document.getElementById('homeContent').innerHTML = `
-<div class="hm-root">
-  <!-- HUD top bar -->
-  <div class="hm-hud-bar">
-    <div class="hm-hud-cell">
-      <div class="hm-hud-label">OPERATOR</div>
-      <div class="hm-hud-val" style="color:${acc}">${ME.toUpperCase()}</div>
-    </div>
-    <div class="hm-hud-cell">
-      <div class="hm-hud-label">DAY</div>
-      <div class="hm-hud-val" style="color:${acc}">${myMax}</div>
-    </div>
-    <div class="hm-hud-cell">
-      <div class="hm-hud-label">STREAK</div>
-      <div class="hm-hud-val" style="color:${acc}">${myStreak}🔥</div>
-    </div>
-    <div class="hm-hud-cell">
-      <div class="hm-hud-label">7D POSTS</div>
-      <div class="hm-hud-val" style="color:${acc}">${myWeek}</div>
-    </div>
-    <div class="hm-hud-cell">
-      <div class="hm-hud-label">SESSION TIME TODAY</div>
-      <div class="hm-hud-val" style="color:${acc}">${todayMins}m</div>
-    </div>
-  </div>
-
-  <!-- SESSION RECORDER -->
-  <div class="hm-session-block" id="hmSessionBlock">
-    <div class="hm-session-title">SESSION RECORDER</div>
-    <div class="hm-session-status" id="hmSessionStatus">${sessionActive ? '● RECORDING' : '○ STANDBY'}</div>
-    <div class="hm-session-timer" id="hmSessionTimer">${sessionActive ? fmtElapsed() : '00:00:00'}</div>
-    <div class="hm-session-note-row">
-      <input id="hmSessionNote" placeholder="what are you working on..." class="hm-session-input" value="${sessionActive ? (window._sessionNote||'') : ''}">
-    </div>
-    <div style="display:flex;gap:8px;justify-content:center;margin-top:10px">
-      ${sessionActive
-        ? `<button class="hm-btn hm-btn-stop" onclick="endSession()">■ END SESSION</button>`
-        : `<button class="hm-btn hm-btn-start" onclick="startSession()">▶ START SESSION</button>`
-      }
-    </div>
-  </div>
-
-  <!-- TODAY'S SESSIONS LOG -->
-  <div class="hm-section-title">TODAY'S SESSIONS</div>
-  <div class="hm-sessions-log">
-    ${todaySessions.length ? todaySessions.map(s=>`
-      <div class="hm-session-entry">
-        <span class="hm-se-time">${s.startTime}</span>
-        <span class="hm-se-note">${s.note||'—'}</span>
-        <span class="hm-se-dur">${s.dur}m</span>
-      </div>
-    `).join('') : '<div class="hm-empty">no sessions recorded today</div>'}
-  </div>
-
-  <!-- GRAPHS SECTION -->
-  <div class="hm-section-title">ACTIVITY GRAPH</div>
-  <div class="hm-graph-row">
-    <div class="hm-graph-panel">
-      <div class="hm-graph-label">${ME} — posts per week</div>
-      <canvas id="hmGraph1" width="300" height="80"></canvas>
-    </div>
-    <div class="hm-graph-panel">
-      <div class="hm-graph-label">${FRIEND()} — posts per week</div>
-      <canvas id="hmGraph2" width="300" height="80"></canvas>
-    </div>
-  </div>
-
-  <!-- VS PANEL -->
-  <div class="hm-vs-row">
-    <div class="hm-vs-card" style="border-color:${settings.u1Hex||'#00ffc8'}22">
-      <div class="hm-vs-name" style="color:${settings.u1Hex||'#00ffc8'}">MONISH</div>
-      <div class="hm-vs-stat">${(allPosts['Monish']?Object.keys(allPosts['Monish']).length:0)} posts · ${streaks['Monish']||0}🔥</div>
-      <div class="hm-vs-week">${(()=>{const p=Object.values(allPosts['Monish']||{});return p.filter(x=>(Date.now()-x.ts)<604800000).length})()}  this week</div>
-    </div>
-    <div class="hm-vs-mid">VS</div>
-    <div class="hm-vs-card" style="border-color:${settings.u2Hex||'#ff00cc'}22">
-      <div class="hm-vs-name" style="color:${settings.u2Hex||'#ff00cc'}">PRASHANTH</div>
-      <div class="hm-vs-stat">${(allPosts['Prashanth']?Object.keys(allPosts['Prashanth']).length:0)} posts · ${streaks['Prashanth']||0}🔥</div>
-      <div class="hm-vs-week">${(()=>{const p=Object.values(allPosts['Prashanth']||{});return p.filter(x=>(Date.now()-x.ts)<604800000).length})()} this week</div>
-    </div>
-  </div>
-</div>`;
-
-  drawHomeGraph('hmGraph1','Monish', settings.u1Hex||'#00ffc8');
-  drawHomeGraph('hmGraph2','Prashanth', settings.u2Hex||'#ff00cc');
-  if (sessionActive) startSessionTick();
-}
-
-function fmtElapsed() {
-  if (!sessionStart) return '00:00:00';
-  const s = Math.floor((Date.now()-sessionStart)/1000);
-  const h = String(Math.floor(s/3600)).padStart(2,'0');
-  const m = String(Math.floor((s%3600)/60)).padStart(2,'0');
-  const sc = String(s%60).padStart(2,'0');
-  return `${h}:${m}:${sc}`;
-}
-
-function startSessionTick() {
-  clearInterval(sessionTimer);
-  sessionTimer = setInterval(()=>{
-    const el = document.getElementById('hmSessionTimer');
-    if (el) el.textContent = fmtElapsed();
-    else clearInterval(sessionTimer);
-  }, 1000);
-}
-
-window.startSession = function() {
-  sessionActive = true;
-  sessionStart = Date.now();
-  window._sessionNote = document.getElementById('hmSessionNote')?.value || '';
-  startSessionTick();
-  renderHome();
-};
-
-window.endSession = function() {
-  if (!sessionStart) return;
-  const dur = Math.max(1, Math.round((Date.now()-sessionStart)/60000));
-  const note = document.getElementById('hmSessionNote')?.value || window._sessionNote || '';
-  const entry = {
-    date: new Date().toISOString().slice(0,10),
-    startTime: new Date(sessionStart).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}),
-    dur, note
-  };
-  sessionLog.push(entry);
-  try { localStorage.setItem('epoch_sessions_'+ME, JSON.stringify(sessionLog)); } catch(e){}
-  clearInterval(sessionTimer);
-  sessionActive = false;
-  sessionStart = null;
-  window._sessionNote = '';
-  showToast(`session saved — ${dur} min`);
-  renderHome();
-};
-
-function drawHomeGraph(canvasId, user, color) {
-  const canvas = document.getElementById(canvasId);
-  if (!canvas) return;
-  const ctx = canvas.getContext('2d');
-  const W = canvas.offsetWidth || 300;
-  const H = canvas.offsetHeight || 80;
-  canvas.width = W; canvas.height = H;
-  ctx.clearRect(0,0,W,H);
-
-  // Build 8 weeks of data
-  const posts = Object.values(allPosts[user] || {});
-  const weeks = [];
-  for (let i=7;i>=0;i--) {
-    const wStart = Date.now() - (i+1)*7*86400000;
-    const wEnd = Date.now() - i*7*86400000;
-    weeks.push(posts.filter(p=>p.ts>=wStart&&p.ts<wEnd).length);
-  }
-  const maxW = Math.max(...weeks,1);
-  const pad = 10;
-  const bw = (W - pad*2) / weeks.length;
-
-  ctx.strokeStyle = color + '33';
-  ctx.lineWidth = 1;
-  ctx.setLineDash([2,4]);
-  for (let i=0;i<=4;i++) {
-    const y = pad + (H-pad*2)*(1-i/4);
-    ctx.beginPath(); ctx.moveTo(pad,y); ctx.lineTo(W-pad,y); ctx.stroke();
-  }
-  ctx.setLineDash([]);
-
-  // Bar chart
-  weeks.forEach((v,i)=>{
-    const bh = ((H-pad*2)*v/maxW);
-    const x = pad + i*bw + bw*0.15;
-    const y = H-pad-bh;
-    const grad = ctx.createLinearGradient(0,y,0,H-pad);
-    grad.addColorStop(0, color);
-    grad.addColorStop(1, color+'22');
-    ctx.fillStyle = grad;
-    ctx.fillRect(x, y, bw*0.7, bh);
-    ctx.fillStyle = 'rgba(255,255,255,0.3)';
-    ctx.font = '7px Space Mono,monospace';
-    ctx.textAlign = 'center';
-    if(v>0) ctx.fillText(v, x+bw*0.35, y-3);
-  });
-
-  // Week labels
-  ctx.fillStyle = 'rgba(255,255,255,0.2)';
-  ctx.font = '6px Space Mono,monospace';
-  weeks.forEach((_,i)=>{
-    ctx.fillText(`w${8-7+i}`, pad+i*bw+bw*0.5, H-1);
-  });
-}
-
 // ── TABS ──
 window.goTab = function(tab) {
-  ['home','feed','timeline','heatmap','search','export'].forEach(t => {
+  ['home','feed','timeline','heatmap','search','export','stats'].forEach(t => {
     const v = document.getElementById(t + 'View');
     if (v) v.style.display = 'none';
     const tb = document.getElementById('tb-' + t);
@@ -735,22 +663,95 @@ window.goTab = function(tab) {
     if (nt) nt.classList.remove('on');
   });
   const view = document.getElementById(tab + 'View');
-  if (view) view.style.display = tab === 'feed' ? 'flex' : 'block';
+  if (view) view.style.display = tab === 'feed' || tab === 'home' ? 'flex' : 'block';
   const tb = document.getElementById('tb-' + tab);
   if (tb) tb.classList.add('on');
   const nt = document.getElementById('nt-' + tab);
   if (nt) nt.classList.add('on');
-  if (tab === 'home') renderHome();
   if (tab === 'timeline') renderTimeline();
-  if (tab === 'heatmap') {
+  if (tab === 'heatmap' || tab === 'stats') {
     buildHmapControls(ME);
     buildHmapControls(FRIEND());
     buildHmap(ME, hmapRange[ME]);
     buildHmap(FRIEND(), hmapRange[FRIEND()]);
+    if (tab === 'stats') { renderStatsView(); updateSessionStatsUI(); }
   }
   if (tab === 'search') { doSearch(document.getElementById('searchInp').value); }
   if (tab === 'export') { updateExportCounts(); }
+  if (tab === 'home') { renderHomeWidgets(); }
 };
+
+function renderHomeWidgets() {
+  // update home stats
+  const myPosts = Object.values(allPosts[ME] || {});
+  const frPosts = Object.values(allPosts[FRIEND()] || {});
+  const el1 = document.getElementById('homeMyPosts'); if(el1) el1.textContent = myPosts.length;
+  const el2 = document.getElementById('homeFrPosts'); if(el2) el2.textContent = frPosts.length;
+  const el3 = document.getElementById('homeMyStreak'); if(el3) el3.textContent = streaks[ME] || 0;
+  const el4 = document.getElementById('homeFrStreak'); if(el4) el4.textContent = streaks[FRIEND()] || 0;
+  const myMaxDay = myPosts.length ? Math.max(...myPosts.map(p => p.day || 0)) : 0;
+  const el5 = document.getElementById('homeMyDay'); if(el5) el5.textContent = myMaxDay;
+  // Mini heatmap on home
+  buildMiniHmap('homeMiniHmap', ME);
+  // Recent posts preview
+  const rp = document.getElementById('homeRecentPosts');
+  if (rp) {
+    const sorted = myPosts.sort((a,b) => b.ts - a.ts).slice(0,3);
+    if (!sorted.length) { rp.innerHTML = '<div style="font-family:Space Mono,monospace;font-size:8px;color:rgba(255,255,255,0.2);text-align:center;padding:12px">no posts yet</div>'; }
+    else {
+      rp.innerHTML = sorted.map(p => `<div style="padding:8px 10px;background:var(--u1-acc2);border:1px solid var(--u1-brd);border-radius:2px;cursor:pointer" onclick="goTab('feed')">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
+          <span style="font-family:Orbitron,monospace;font-size:8px;font-weight:700;color:var(--u1-acc)">day ${p.day}</span>
+          <span style="font-family:Space Mono,monospace;font-size:7px;color:rgba(255,255,255,0.3)">${p.date}</span>
+        </div>
+        <div style="font-size:11px;color:rgba(255,255,255,0.8);line-height:1.4;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${p.text}</div>
+      </div>`).join('');
+    }
+  }
+  // Update session stats chart
+  updateSessionStatsUI();
+}
+
+
+function buildMiniHmap(containerId, user) {
+  const c = document.getElementById(containerId);
+  if (!c) return;
+  const col = user === ME ? 'u1' : 'u2';
+  const posts = Object.values(allPosts[user] || {});
+  const postDates = new Set(posts.map(p => p.date));
+  c.innerHTML = '';
+  c.style.display = 'flex';
+  c.style.flexWrap = 'wrap';
+  c.style.gap = '3px';
+  const today = new Date();
+  for (let i = 29; i >= 0; i--) {
+    const d = new Date(today);
+    d.setDate(today.getDate() - i);
+    const ds = d.toLocaleDateString([], {day:'numeric', month:'short'});
+    const cell = document.createElement('div');
+    cell.style.cssText = `width:12px;height:12px;border-radius:2px;flex-shrink:0;border:1px solid ${postDates.has(ds) ? 'var(--'+col+'-brd2)' : 'rgba(255,255,255,0.07)'};background:${postDates.has(ds) ? 'var(--'+col+'-accl)' : 'rgba(255,255,255,0.03)'};cursor:default`;
+    cell.title = ds;
+    c.appendChild(cell);
+  }
+}
+
+function renderStatsView() {
+  // post frequency chart
+  const myPosts = Object.values(allPosts[ME] || {});
+  const chart = document.getElementById('statsPostChart');
+  if (!chart) return;
+  // Last 14 days
+  const today = new Date();
+  const days = Array.from({length:14}, (_,i) => { const d = new Date(today); d.setDate(today.getDate()-(13-i)); return d.toLocaleDateString([],{day:'numeric',month:'short'}); });
+  const counts = days.map(ds => myPosts.filter(p => p.date === ds).length);
+  const max = Math.max(...counts, 1);
+  chart.innerHTML = '<div style="display:flex;align-items:flex-end;gap:4px;height:70px">' +
+    days.map((ds,i) => {
+      const h = Math.round((counts[i]/max)*60)+4;
+      return `<div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:2px"><div style="width:100%;height:${h}px;background:${counts[i]>0?'var(--u1-accl)':'rgba(255,255,255,0.04)'};border:1px solid ${counts[i]>0?'var(--u1-brd2)':'rgba(255,255,255,0.06)'};border-radius:2px;transition:all 0.3s" title="${ds}: ${counts[i]} posts"></div><div style="font-family:Space Mono,monospace;font-size:6px;color:rgba(255,255,255,0.3);transform:rotate(-45deg);transform-origin:center;white-space:nowrap">${ds.split(' ')[0]}</div></div>`;
+    }).join('') + '</div>';
+}
+
 
 // ── SETTINGS ──
 window.togSett = function() { document.getElementById('settPanel').classList.toggle('open'); };
@@ -1542,7 +1543,7 @@ window.sendInlineComment = async function(postKey, postUser) {
 };
 
 // ── GIPHY SETTINGS ──
-const GIPHY_KEY = 'B7OCuA0LKCGUyZuMtGeuLOpY8AuwcDCC';
+const GIPHY_KEY = 'B7OCuA0LKCGUyZuMtGeuLOpY8AuwcDCC'; // get free key at developers.giphy.com
 let giphyTarget = null; // {postKey, postUser} for which comment box the picker is for
 
 window.openGiphyPicker = function(postKey, postUser) {
@@ -1562,8 +1563,8 @@ window.closeGiphyPicker = function() {
 
 window.searchGiphy = async function() {
   const q = document.getElementById('giphySearch').value.trim();
-  if (!q) {
-    showToast('enter a search term'); return;
+  if (!q || GIPHY_KEY === 'PASTE_YOUR_GIPHY_KEY_HERE') {
+    showToast('add giphy api key in code first'); return;
   }
   const grid = document.getElementById('giphyGrid');
   grid.innerHTML = '<div class="giphy-loading">searching...</div>';
@@ -2273,42 +2274,6 @@ body.ui-glass .taskbar,body.u1-glass .taskbar,body.u2-glass .taskbar{background:
 /* ── TOAST ── */
 .toast{position:fixed;bottom:80px;right:16px;background:rgba(7,18,16,0.96);border:1px solid rgba(0,255,200,0.25);padding:10px 14px;font-family:'Space Mono',monospace;font-size:9px;color:rgba(0,255,200,0.85);z-index:400;max-width:220px;border-radius:2px;animation:fadeup 0.3s ease;box-shadow:0 0 16px rgba(0,255,200,0.08)}
 @keyframes fadeup{from{opacity:0;transform:translateY(7px)}to{opacity:1;transform:translateY(0)}}
-/* HOME / IRON MAN UI */
-.hm-root{padding:16px;display:flex;flex-direction:column;gap:14px;max-width:900px;margin:0 auto}
-.hm-hud-bar{display:flex;gap:0;border:1px solid rgba(0,255,200,0.15);background:rgba(0,255,200,0.03);border-radius:4px;overflow:hidden}
-.hm-hud-cell{flex:1;padding:10px 12px;border-right:1px solid rgba(0,255,200,0.08);text-align:center}
-.hm-hud-cell:last-child{border-right:none}
-.hm-hud-label{font-family:'Orbitron',monospace;font-size:7px;letter-spacing:2px;color:rgba(255,255,255,0.3);margin-bottom:4px}
-.hm-hud-val{font-family:'Orbitron',monospace;font-size:14px;font-weight:700;text-shadow:0 0 12px currentColor}
-.hm-section-title{font-family:'Orbitron',monospace;font-size:9px;letter-spacing:3px;color:rgba(255,255,255,0.25);border-bottom:1px solid rgba(255,255,255,0.06);padding-bottom:6px;margin-top:4px}
-.hm-session-block{background:rgba(0,0,0,0.4);border:1px solid rgba(0,255,200,0.2);border-radius:6px;padding:20px;text-align:center;position:relative;overflow:hidden}
-.hm-session-block::before{content:'';position:absolute;inset:0;background:linear-gradient(135deg,rgba(0,255,200,0.03) 0%,transparent 60%);pointer-events:none}
-.hm-session-title{font-family:'Orbitron',monospace;font-size:9px;letter-spacing:3px;color:rgba(255,255,255,0.4);margin-bottom:8px}
-.hm-session-status{font-family:'Space Mono',monospace;font-size:10px;color:rgba(0,255,200,0.6);margin-bottom:6px}
-.hm-session-timer{font-family:'Orbitron',monospace;font-size:36px;font-weight:900;color:#fff;text-shadow:0 0 30px rgba(0,255,200,0.4);letter-spacing:4px;margin-bottom:12px}
-.hm-session-input{background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.1);color:#e0f5ef;font-family:'Space Mono',monospace;font-size:10px;padding:8px 12px;border-radius:3px;outline:none;width:100%;box-sizing:border-box}
-.hm-session-input:focus{border-color:rgba(0,255,200,0.4)}
-.hm-btn{font-family:'Orbitron',monospace;font-size:10px;letter-spacing:2px;padding:10px 24px;border:none;border-radius:3px;cursor:pointer;transition:all 0.2s;font-weight:700}
-.hm-btn-start{background:rgba(0,255,200,0.15);color:#00ffc8;border:1px solid rgba(0,255,200,0.4)}
-.hm-btn-start:hover{background:rgba(0,255,200,0.3);box-shadow:0 0 20px rgba(0,255,200,0.3)}
-.hm-btn-stop{background:rgba(255,60,60,0.15);color:#ff4444;border:1px solid rgba(255,60,60,0.4)}
-.hm-btn-stop:hover{background:rgba(255,60,60,0.3);box-shadow:0 0 20px rgba(255,60,60,0.3)}
-.hm-sessions-log{display:flex;flex-direction:column;gap:4px}
-.hm-session-entry{display:flex;align-items:center;gap:10px;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.06);border-radius:3px;padding:8px 12px;font-family:'Space Mono',monospace;font-size:9px}
-.hm-se-time{color:rgba(255,255,255,0.35);flex-shrink:0;width:50px}
-.hm-se-note{flex:1;color:rgba(255,255,255,0.7)}
-.hm-se-dur{color:#00ffc8;flex-shrink:0;font-weight:700}
-.hm-empty{font-family:'Space Mono',monospace;font-size:9px;color:rgba(255,255,255,0.2);text-align:center;padding:16px}
-.hm-graph-row{display:grid;grid-template-columns:1fr 1fr;gap:12px}
-.hm-graph-panel{background:rgba(0,0,0,0.3);border:1px solid rgba(255,255,255,0.06);border-radius:4px;padding:12px}
-.hm-graph-label{font-family:'Orbitron',monospace;font-size:8px;letter-spacing:1px;color:rgba(255,255,255,0.3);margin-bottom:8px}
-.hm-graph-panel canvas{width:100%;height:80px;display:block}
-.hm-vs-row{display:flex;align-items:center;gap:12px}
-.hm-vs-card{flex:1;background:rgba(0,0,0,0.3);border:1px solid;border-radius:4px;padding:14px;text-align:center}
-.hm-vs-name{font-family:'Orbitron',monospace;font-size:12px;font-weight:700;letter-spacing:2px;margin-bottom:6px;text-shadow:0 0 14px currentColor}
-.hm-vs-stat{font-family:'Space Mono',monospace;font-size:9px;color:rgba(255,255,255,0.6);margin-bottom:4px}
-.hm-vs-week{font-family:'Space Mono',monospace;font-size:8px;color:rgba(255,255,255,0.3)}
-.hm-vs-mid{font-family:'Orbitron',monospace;font-size:18px;font-weight:900;color:rgba(255,255,255,0.15);flex-shrink:0}
 </style>
 </head>
 <body>
@@ -2505,12 +2470,12 @@ body.ui-glass .taskbar,body.u1-glass .taskbar,body.u2-glass .taskbar{background:
       <span id="qtxt" class="qtxt-inline"></span>
     </div>
     <div class="hdr-right">
-      <button class="hbtn" id="nt-home" onclick="goTab('home')">home</button>
-      <button class="hbtn on" id="nt-feed" onclick="goTab('feed')">feed</button>
-      <button class="hbtn" id="nt-timeline" onclick="goTab('timeline')">timeline</button>
-      <button class="hbtn" id="nt-heatmap" onclick="goTab('heatmap')">stats</button>
-      <button class="hbtn" id="nt-search" onclick="goTab('search')">search</button>
-      <button class="hbtn" id="nt-export" onclick="goTab('export')">export</button>
+      <button class="hbtn" id="nt-home" onclick="goTab('home')">🏠 home</button>
+      <button class="hbtn" id="nt-feed" onclick="goTab('feed')">📋 feed</button>
+      <button class="hbtn" id="nt-timeline" onclick="goTab('timeline')">📅 timeline</button>
+      <button class="hbtn" id="nt-stats" onclick="goTab('stats')">📈 stats</button>
+      <button class="hbtn" id="nt-search" onclick="goTab('search')">🔍 search</button>
+      <button class="hbtn" id="nt-export" onclick="goTab('export')">⬇ export</button>
       <div class="hdr-divider"></div>
       <button class="hbtn" onclick="togSett()">⚙</button>
       <button class="hbtn danger" id="logoutBtn" onclick="logout()">↪</button>
@@ -2542,12 +2507,163 @@ body.ui-glass .taskbar,body.u1-glass .taskbar,body.u2-glass .taskbar{background:
 
 
 
-  <!-- FEED -->
-  <!-- HOME -->
-  <div id="homeView" style="display:none;overflow-y:auto;flex:1;min-height:0;padding:0">
-    <div id="homeContent"></div>
+  <!-- HOME VIEW — IRON MAN DASHBOARD -->
+  <div id="homeView" style="display:none;flex:1;min-height:0;overflow-y:auto;padding:14px;gap:12px;flex-direction:column">
+    <!-- TOP ROW: Session + Quick Stats -->
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;flex-shrink:0">
+      <!-- SESSION RECORDER WIDGET -->
+      <div id="sessionWidget" style="background:rgba(0,255,200,0.04);border:1px solid var(--u1-brd2);border-radius:4px;padding:14px;display:flex;flex-direction:column;gap:10px">
+        <div style="display:flex;align-items:center;gap:8px">
+          <div id="sessionDot" style="width:8px;height:8px;border-radius:50%;background:rgba(255,255,255,0.2);transition:all 0.3s;flex-shrink:0"></div>
+          <span style="font-family:Orbitron,monospace;font-size:10px;font-weight:700;color:var(--u1-acc);letter-spacing:0.15em">SESSION REC</span>
+        </div>
+        <div id="sessionTime" style="font-family:Orbitron,monospace;font-size:28px;font-weight:900;color:#fff;letter-spacing:0.05em;line-height:1">00:00</div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap">
+          <button onclick="startSession()" style="flex:1;min-width:60px;background:var(--u1-acc);color:#000;font-family:Orbitron,monospace;font-size:8px;font-weight:700;padding:7px 8px;border:none;cursor:pointer;border-radius:2px;letter-spacing:0.08em">▶ START</button>
+          <button id="sessionPauseBtn" onclick="pauseSession()" style="flex:1;min-width:60px;background:rgba(255,170,0,0.15);border:1px solid rgba(255,170,0,0.4);color:rgba(255,170,0,0.9);font-family:Orbitron,monospace;font-size:8px;font-weight:700;padding:7px 8px;cursor:pointer;border-radius:2px;letter-spacing:0.08em">⏸ PAUSE</button>
+          <button onclick="stopSession()" style="flex:1;min-width:60px;background:rgba(255,80,80,0.1);border:1px solid rgba(255,80,80,0.35);color:rgba(255,80,80,0.8);font-family:Orbitron,monospace;font-size:8px;font-weight:700;padding:7px 8px;cursor:pointer;border-radius:2px;letter-spacing:0.08em">⏹ STOP</button>
+        </div>
+        <div style="font-family:Space Mono,monospace;font-size:8px;color:rgba(255,255,255,0.3);letter-spacing:0.05em">records work session · auto-saves to firebase</div>
+      </div>
+
+      <!-- MY STATS WIDGET -->
+      <div style="background:var(--u1-bg2);border:1px solid var(--u1-brd);border-radius:4px;padding:14px;display:flex;flex-direction:column;gap:10px">
+        <div style="font-family:Orbitron,monospace;font-size:9px;font-weight:700;color:var(--u1-acc);letter-spacing:0.15em">⚡ MY STATS</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+          <div><div id="homeMyStreak" style="font-family:Orbitron,monospace;font-size:22px;font-weight:900;color:var(--u1-acc)">0</div><div style="font-family:Space Mono,monospace;font-size:7px;color:rgba(255,255,255,0.4);letter-spacing:0.1em">STREAK 🔥</div></div>
+          <div><div id="homeMyPosts" style="font-family:Orbitron,monospace;font-size:22px;font-weight:900;color:#fff">0</div><div style="font-family:Space Mono,monospace;font-size:7px;color:rgba(255,255,255,0.4);letter-spacing:0.1em">TOTAL POSTS</div></div>
+          <div><div id="homeMyDay" style="font-family:Orbitron,monospace;font-size:22px;font-weight:900;color:var(--u1-acc)">0</div><div style="font-family:Space Mono,monospace;font-size:7px;color:rgba(255,255,255,0.4);letter-spacing:0.1em">CURRENT DAY</div></div>
+          <div><div id="homeFrStreak" style="font-family:Orbitron,monospace;font-size:22px;font-weight:900;color:var(--u2-acc)">0</div><div style="font-family:Space Mono,monospace;font-size:7px;color:rgba(255,255,255,0.4);letter-spacing:0.1em">FRIEND STREAK 🔥</div></div>
+        </div>
+      </div>
+
+      <!-- FRIEND STATS WIDGET -->
+      <div style="background:var(--u2-bg2);border:1px solid var(--u2-brd);border-radius:4px;padding:14px;display:flex;flex-direction:column;gap:10px">
+        <div style="font-family:Orbitron,monospace;font-size:9px;font-weight:700;color:var(--u2-acc);letter-spacing:0.15em">💀 FRIEND STATS</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+          <div><div id="homeFrPosts" style="font-family:Orbitron,monospace;font-size:22px;font-weight:900;color:var(--u2-acc)">0</div><div style="font-family:Space Mono,monospace;font-size:7px;color:rgba(255,255,255,0.4);letter-spacing:0.1em">TOTAL POSTS</div></div>
+          <div onclick="showWeeklyReport()" style="cursor:pointer"><div style="font-family:Orbitron,monospace;font-size:14px;font-weight:900;color:var(--u2-acc)">📊</div><div style="font-family:Space Mono,monospace;font-size:7px;color:rgba(255,255,255,0.4);letter-spacing:0.1em">WEEKLY REPORT</div></div>
+          <div onclick="goTab('feed')" style="cursor:pointer"><div style="font-family:Orbitron,monospace;font-size:14px;font-weight:900;color:var(--u2-acc)">📋</div><div style="font-family:Space Mono,monospace;font-size:7px;color:rgba(255,255,255,0.4);letter-spacing:0.1em">VIEW FEED</div></div>
+          <div onclick="goTab('stats')" style="cursor:pointer"><div style="font-family:Orbitron,monospace;font-size:14px;font-weight:900;color:var(--u2-acc)">📈</div><div style="font-family:Space Mono,monospace;font-size:7px;color:rgba(255,255,255,0.4);letter-spacing:0.1em">OPEN STATS</div></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- MIDDLE ROW: Mini heatmap + Quick post + Favorite apps -->
+    <div style="display:grid;grid-template-columns:2fr 1fr;gap:10px;flex-shrink:0">
+      <!-- MINI HEATMAP -->
+      <div style="background:rgba(0,255,200,0.03);border:1px solid var(--u1-brd);border-radius:4px;padding:14px">
+        <div style="font-family:Orbitron,monospace;font-size:9px;font-weight:700;color:var(--u1-acc);letter-spacing:0.15em;margin-bottom:10px">🗓 30-DAY CONSISTENCY</div>
+        <div id="homeMiniHmap"></div>
+        <div style="font-family:Space Mono,monospace;font-size:7px;color:rgba(255,255,255,0.3);letter-spacing:0.08em;margin-top:8px">each square = 1 day · <span style="color:var(--u1-acc)">●</span> posted · <span style="color:rgba(255,255,255,0.2)">○</span> missed</div>
+      </div>
+
+      <!-- QUICK ACTIONS -->
+      <div style="background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.08);border-radius:4px;padding:14px;display:flex;flex-direction:column;gap:8px">
+        <div style="font-family:Orbitron,monospace;font-size:9px;font-weight:700;color:rgba(255,255,255,0.6);letter-spacing:0.15em;margin-bottom:2px">⚡ QUICK ACTIONS</div>
+        <button onclick="goTab('feed');setTimeout(()=>document.getElementById('pinp1').focus(),100)" style="background:var(--u1-acc2);border:1px solid var(--u1-brd2);color:var(--u1-acc);font-family:Orbitron,monospace;font-size:9px;font-weight:700;padding:10px;cursor:pointer;border-radius:2px;text-align:left;letter-spacing:0.08em">✍ LOG POST</button>
+        <button onclick="startSession()" style="background:rgba(0,255,200,0.08);border:1px solid rgba(0,255,200,0.3);color:#00ffc8;font-family:Orbitron,monospace;font-size:9px;font-weight:700;padding:10px;cursor:pointer;border-radius:2px;text-align:left;letter-spacing:0.08em">🎬 START SESSION</button>
+        <button onclick="showWeeklyReport()" style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.1);color:rgba(255,255,255,0.6);font-family:Orbitron,monospace;font-size:9px;font-weight:700;padding:10px;cursor:pointer;border-radius:2px;text-align:left;letter-spacing:0.08em">📊 WEEKLY WRAP</button>
+        <button onclick="goTab('stats')" style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.1);color:rgba(255,255,255,0.6);font-family:Orbitron,monospace;font-size:9px;font-weight:700;padding:10px;cursor:pointer;border-radius:2px;text-align:left;letter-spacing:0.08em">📈 VIEW STATS</button>
+      </div>
+    </div>
+
+    <!-- FAVORITE APPS BAR -->
+    <div style="background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.07);border-radius:4px;padding:12px;flex-shrink:0">
+      <div style="font-family:Orbitron,monospace;font-size:8px;font-weight:700;color:rgba(255,255,255,0.4);letter-spacing:0.15em;margin-bottom:10px">★ FAVORITE APPS</div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap">
+        <a href="https://github.com" target="_blank" style="display:flex;flex-direction:column;align-items:center;gap:4px;text-decoration:none;padding:8px 12px;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);border-radius:4px;cursor:pointer;transition:all 0.2s" onmouseover="this.style.borderColor='var(--u1-acc)'" onmouseout="this.style.borderColor='rgba(255,255,255,0.08)'"><span style="font-size:18px">🐙</span><span style="font-family:Space Mono,monospace;font-size:7px;color:rgba(255,255,255,0.5)">GitHub</span></a>
+        <a href="https://chat.openai.com" target="_blank" style="display:flex;flex-direction:column;align-items:center;gap:4px;text-decoration:none;padding:8px 12px;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);border-radius:4px;cursor:pointer;transition:all 0.2s" onmouseover="this.style.borderColor='var(--u1-acc)'" onmouseout="this.style.borderColor='rgba(255,255,255,0.08)'"><span style="font-size:18px">🤖</span><span style="font-family:Space Mono,monospace;font-size:7px;color:rgba(255,255,255,0.5)">ChatGPT</span></a>
+        <a href="https://youtube.com" target="_blank" style="display:flex;flex-direction:column;align-items:center;gap:4px;text-decoration:none;padding:8px 12px;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);border-radius:4px;cursor:pointer;transition:all 0.2s" onmouseover="this.style.borderColor='var(--u1-acc)'" onmouseout="this.style.borderColor='rgba(255,255,255,0.08)'"><span style="font-size:18px">▶️</span><span style="font-family:Space Mono,monospace;font-size:7px;color:rgba(255,255,255,0.5)">YouTube</span></a>
+        <a href="https://notion.so" target="_blank" style="display:flex;flex-direction:column;align-items:center;gap:4px;text-decoration:none;padding:8px 12px;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);border-radius:4px;cursor:pointer;transition:all 0.2s" onmouseover="this.style.borderColor='var(--u1-acc)'" onmouseout="this.style.borderColor='rgba(255,255,255,0.08)'"><span style="font-size:18px">📓</span><span style="font-family:Space Mono,monospace;font-size:7px;color:rgba(255,255,255,0.5)">Notion</span></a>
+        <a href="https://figma.com" target="_blank" style="display:flex;flex-direction:column;align-items:center;gap:4px;text-decoration:none;padding:8px 12px;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);border-radius:4px;cursor:pointer;transition:all 0.2s" onmouseover="this.style.borderColor='var(--u1-acc)'" onmouseout="this.style.borderColor='rgba(255,255,255,0.08)'"><span style="font-size:18px">🎨</span><span style="font-family:Space Mono,monospace;font-size:7px;color:rgba(255,255,255,0.5)">Figma</span></a>
+        <a href="https://linear.app" target="_blank" style="display:flex;flex-direction:column;align-items:center;gap:4px;text-decoration:none;padding:8px 12px;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);border-radius:4px;cursor:pointer;transition:all 0.2s" onmouseover="this.style.borderColor='var(--u1-acc)'" onmouseout="this.style.borderColor='rgba(255,255,255,0.08)'"><span style="font-size:18px">📐</span><span style="font-family:Space Mono,monospace;font-size:7px;color:rgba(255,255,255,0.5)">Linear</span></a>
+        <a href="https://x.com" target="_blank" style="display:flex;flex-direction:column;align-items:center;gap:4px;text-decoration:none;padding:8px 12px;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);border-radius:4px;cursor:pointer;transition:all 0.2s" onmouseover="this.style.borderColor='var(--u1-acc)'" onmouseout="this.style.borderColor='rgba(255,255,255,0.08)'"><span style="font-size:18px">𝕏</span><span style="font-family:Space Mono,monospace;font-size:7px;color:rgba(255,255,255,0.5)">X/Twitter</span></a>
+      </div>
+    </div>
+
+    <!-- BOTTOM ROW: Quote + Recent activity -->
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;flex-shrink:0;flex:1">
+      <!-- RECENT POSTS PREVIEW -->
+      <div style="background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.07);border-radius:4px;padding:14px;overflow:hidden">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+          <div style="font-family:Orbitron,monospace;font-size:9px;font-weight:700;color:rgba(255,255,255,0.5);letter-spacing:0.15em">📋 RECENT POSTS</div>
+          <button onclick="goTab('feed')" style="background:none;border:1px solid rgba(255,255,255,0.1);color:rgba(255,255,255,0.4);font-family:Space Mono,monospace;font-size:7px;padding:3px 8px;cursor:pointer;border-radius:2px;letter-spacing:0.05em">view more →</button>
+        </div>
+        <div id="homeRecentPosts" style="display:flex;flex-direction:column;gap:6px">
+          <div style="font-family:Space Mono,monospace;font-size:8px;color:rgba(255,255,255,0.2);text-align:center;padding:12px">loading...</div>
+        </div>
+      </div>
+
+      <!-- SESSION HISTORY CHART -->
+      <div style="background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.07);border-radius:4px;padding:14px">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+          <div style="font-family:Orbitron,monospace;font-size:9px;font-weight:700;color:rgba(255,255,255,0.5);letter-spacing:0.15em">⏱ SESSION HISTORY</div>
+          <button onclick="goTab('stats')" style="background:none;border:1px solid rgba(255,255,255,0.1);color:rgba(255,255,255,0.4);font-family:Space Mono,monospace;font-size:7px;padding:3px 8px;cursor:pointer;border-radius:2px;letter-spacing:0.05em">📈 more stats →</button>
+        </div>
+        <div id="statsSessionChart" style="min-height:80px"></div>
+      </div>
+    </div>
   </div>
 
+  <!-- STATS VIEW (replaces heatmap) -->
+  <div id="statsView" style="display:none;overflow-y:auto;flex:1;min-height:0;padding:16px">
+    <div style="max-width:1100px;margin:0 auto;display:flex;flex-direction:column;gap:16px">
+      <!-- Header -->
+      <div style="font-family:Orbitron,monospace;font-size:14px;font-weight:900;color:var(--u1-acc);letter-spacing:0.15em;text-shadow:var(--u1-glow)">📈 STATS DASHBOARD</div>
+
+      <!-- Consistency heatmaps -->
+      <div class="hmap-page" id="heatmapContent" style="padding:0;gap:16px">
+        <div class="hmap-panel hmap-u1">
+          <div class="hmap-title" id="hmapName1">MY CONSISTENCY</div>
+          <div class="hmap-stat" id="hmapStat1">0 posts total</div>
+          <div class="hmap-controls" id="hctrl_Monish"></div>
+          <div class="dp-controls">
+            <span class="dp-lbl">1 square =</span>
+            <button class="hrange on" id="dp_Monish_1" onclick="setDaysPer('Monish',1)">1 day</button>
+            <button class="hrange" id="dp_Monish_2" onclick="setDaysPer('Monish',2)">2 days</button>
+            <button class="hrange" id="dp_Monish_3" onclick="setDaysPer('Monish',3)">3 days</button>
+          </div>
+          <div id="hgrid_Monish"></div>
+          <div style="display:flex;align-items:center;gap:6px;margin-top:8px;font-family:Space Mono,monospace;font-size:8px;color:rgba(255,255,255,0.5)">
+            <div style="width:10px;height:10px;border-radius:2px;background:var(--u1-accl);border:1px solid var(--u1-brd2);flex-shrink:0"></div> posted
+            <div style="width:10px;height:10px;border-radius:2px;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.08);flex-shrink:0;margin-left:8px"></div> missed
+          </div>
+        </div>
+        <div class="hmap-panel hmap-u2">
+          <div class="hmap-title" id="hmapName2">FRIEND CONSISTENCY</div>
+          <div class="hmap-stat" id="hmapStat2">0 posts total</div>
+          <div class="hmap-controls" id="hctrl_Prashanth"></div>
+          <div class="dp-controls">
+            <span class="dp-lbl">1 square =</span>
+            <button class="hrange on" id="dp_Prashanth_1" onclick="setDaysPer('Prashanth',1)">1 day</button>
+            <button class="hrange" id="dp_Prashanth_2" onclick="setDaysPer('Prashanth',2)">2 days</button>
+            <button class="hrange" id="dp_Prashanth_3" onclick="setDaysPer('Prashanth',3)">3 days</button>
+          </div>
+          <div id="hgrid_Prashanth"></div>
+          <div style="display:flex;align-items:center;gap:6px;margin-top:8px;font-family:Space Mono,monospace;font-size:8px;color:rgba(255,255,255,0.5)">
+            <div style="width:10px;height:10px;border-radius:2px;background:var(--u2-accl);border:1px solid var(--u2-brd2);flex-shrink:0"></div> posted
+            <div style="width:10px;height:10px;border-radius:2px;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.08);flex-shrink:0;margin-left:8px"></div> missed
+          </div>
+        </div>
+      </div>
+
+      <!-- Post frequency chart -->
+      <div style="background:rgba(0,255,200,0.03);border:1px solid var(--u1-brd);border-radius:4px;padding:16px">
+        <div style="font-family:Orbitron,monospace;font-size:10px;font-weight:700;color:var(--u1-acc);letter-spacing:0.12em;margin-bottom:12px">📊 POST FREQUENCY (LAST 14 DAYS)</div>
+        <div id="statsPostChart"></div>
+      </div>
+
+      <!-- Session chart -->
+      <div style="background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.08);border-radius:4px;padding:16px">
+        <div style="font-family:Orbitron,monospace;font-size:10px;font-weight:700;color:rgba(255,255,255,0.6);letter-spacing:0.12em;margin-bottom:12px">⏱ SESSION RECORDINGS</div>
+        <div id="statsSessionChart2"></div>
+        <div style="font-family:Space Mono,monospace;font-size:8px;color:rgba(255,255,255,0.3);margin-top:8px">sessions tracked via 🎬 session recorder on home page</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- FEED -->
   <div id="feedView" style="display:flex;flex:1;min-height:0;overflow:hidden">
     <div class="dual-feed" style="flex:1">
       <div class="col col-u1">
