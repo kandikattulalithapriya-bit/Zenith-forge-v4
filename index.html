@@ -1092,20 +1092,24 @@ function buildHomeBarChart(containerId) {
 
 // ── FAVORITE APPS ──
 const DEFAULT_FAV_APPS = [
-  {icon:'🐙',name:'GitHub',url:'https://github.com'},
-  {icon:'🤖',name:'ChatGPT',url:'https://chat.openai.com'},
-  {icon:'▶️',name:'YouTube',url:'https://youtube.com'},
-  {icon:'📓',name:'Notion',url:'https://notion.so'},
-  {icon:'🎨',name:'Figma',url:'https://figma.com'},
-  {icon:'𝕏',name:'X',url:'https://x.com'},
-  {icon:'📐',name:'Linear',url:'https://linear.app'},
-  {icon:'🔵',name:'Claude',url:'https://claude.ai'},
+  {icon:'🐙',name:'GitHub',url:'https://github.com',wheel:true},
+  {icon:'🤖',name:'ChatGPT',url:'https://chat.openai.com',wheel:true},
+  {icon:'▶️',name:'YouTube',url:'https://youtube.com',wheel:true},
+  {icon:'📓',name:'Notion',url:'https://notion.so',wheel:true},
+  {icon:'🎨',name:'Figma',url:'https://figma.com',wheel:true},
+  {icon:'𝕏',name:'X',url:'https://x.com',wheel:true},
+  {icon:'📐',name:'Linear',url:'https://linear.app',wheel:true},
+  {icon:'🔵',name:'Claude',url:'https://claude.ai',wheel:true},
 ];
 
 function getFavApps() {
   try {
     const saved = localStorage.getItem('epoch_favapps');
-    if (saved) return JSON.parse(saved);
+    if (saved) {
+      const apps = JSON.parse(saved);
+      // Migrate old entries that don't have a wheel property
+      return apps.map(a => ('wheel' in a) ? a : {...a, wheel: true});
+    }
   } catch(e){}
   return DEFAULT_FAV_APPS;
 }
@@ -1136,7 +1140,9 @@ let wheelMouseX = 0, wheelMouseY = 0;
 const WHEEL_HOLD_MS = 180; // ms hold to open
 
 function getWheelApps() {
-  return getFavApps(); // use all custom apps
+  const all = getFavApps();
+  const selected = all.filter(a => a.wheel !== false);
+  return selected.length > 0 ? selected : all; // fallback: show all if none selected
 }
 
 function openQuickWheel() {
@@ -1320,24 +1326,65 @@ window.openQuickWheelPreview = function() {
 window.openFavEditor = function() {
   const apps = getFavApps();
   const modal = document.getElementById('favEditorModal');
-  const textarea = document.getElementById('favEditorTextarea');
-  if (!modal || !textarea) return;
-  textarea.value = apps.map(a => `${a.icon}|${a.name}|${a.url}`).join('\n');
+  if (!modal) return;
+  renderFavEditorCards(apps);
   modal.style.display = 'flex';
 };
 window.closeFavEditor = function() {
   const modal = document.getElementById('favEditorModal');
   if (modal) modal.style.display = 'none';
 };
-window.saveFavEditor = function() {
-  const textarea = document.getElementById('favEditorTextarea');
-  if (!textarea) return;
-  const lines = textarea.value.trim().split('\n').filter(l=>l.trim());
-  const apps = lines.map(l => {
-    const p = l.split('|');
-    return {icon:(p[0]||'🌐').trim(), name:(p[1]||'App').trim(), url:(p[2]||'#').trim()};
-  }).filter(a => a.url !== '#' || a.name !== 'App');
+
+function renderFavEditorCards(apps) {
+  const list = document.getElementById('favEditorList');
+  if (!list) return;
+  list.innerHTML = apps.map((a, i) => {
+    const inWheel = a.wheel !== false;
+    return `<div class="fav-ed-card" id="fedCard${i}" data-idx="${i}" data-wheel="${inWheel}">
+      <span class="fav-ed-icon">${a.icon}</span>
+      <div class="fav-ed-info">
+        <div class="fav-ed-name">${a.name}</div>
+        <div class="fav-ed-url">${a.url}</div>
+      </div>
+      <button class="fav-ed-wheel-btn ${inWheel ? 'on' : ''}" onclick="toggleWheelApp(${i})" title="${inWheel ? 'remove from wheel' : 'add to wheel'}">⚡</button>
+      <button class="fav-ed-del" onclick="deleteFavApp(${i})" title="delete">✕</button>
+    </div>`;
+  }).join('');
+}
+
+window.toggleWheelApp = function(idx) {
+  const apps = getFavApps();
+  if (!apps[idx]) return;
+  apps[idx].wheel = apps[idx].wheel === false ? true : false;
   saveFavAppsData(apps);
+  renderFavEditorCards(apps);
+};
+
+window.deleteFavApp = function(idx) {
+  const apps = getFavApps();
+  apps.splice(idx, 1);
+  saveFavAppsData(apps);
+  renderFavEditorCards(apps);
+  renderFavApps();
+};
+
+window.addFavAppFromEditor = function() {
+  const inp = document.getElementById('favEditorAddInp');
+  if (!inp) return;
+  const raw = inp.value.trim();
+  if (!raw) return;
+  const p = raw.split('|');
+  if (p.length < 3) { showToast('format: emoji|Name|URL'); return; }
+  const apps = getFavApps();
+  apps.push({icon:(p[0]||'🌐').trim(), name:(p[1]||'App').trim(), url:(p[2]||'#').trim(), wheel: true});
+  saveFavAppsData(apps);
+  renderFavEditorCards(apps);
+  renderFavApps();
+  inp.value = '';
+};
+
+window.saveFavEditor = function() {
+  // Apps are already saved live; just close
   renderFavApps();
   closeFavEditor();
   showToast('apps updated ✓');
@@ -3039,6 +3086,16 @@ body.ui-glass .taskbar,body.u1-glass .taskbar,body.u2-glass .taskbar{background:
 .fav-app-item:hover{background:var(--u1-acc2);border-color:var(--u1-brd2);transform:translateY(-1px)}
 .fav-add-btn{opacity:0.5}
 .fav-add-btn:hover{opacity:1}
+.fav-ed-card{display:flex;align-items:center;gap:8px;padding:7px 10px;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.07);border-radius:4px;transition:background 0.15s}
+.fav-ed-card:hover{background:rgba(255,255,255,0.05)}
+.fav-ed-icon{font-size:18px;flex-shrink:0;width:24px;text-align:center}
+.fav-ed-info{flex:1;min-width:0}
+.fav-ed-name{font-family:Space Mono,monospace;font-size:9px;color:#e0f5ef;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.fav-ed-url{font-family:Space Mono,monospace;font-size:7px;color:rgba(255,255,255,0.3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:1px}
+.fav-ed-wheel-btn{flex-shrink:0;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.1);color:rgba(255,255,255,0.2);font-size:11px;width:28px;height:28px;border-radius:4px;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:all 0.15s;line-height:1}
+.fav-ed-wheel-btn.on{background:rgba(0,255,200,0.12);border-color:rgba(0,255,200,0.45);color:rgba(0,255,200,0.9);box-shadow:0 0 8px rgba(0,255,200,0.15)}
+.fav-ed-del{flex-shrink:0;background:none;border:none;color:rgba(255,255,255,0.2);font-size:11px;width:22px;height:22px;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:color 0.15s;padding:0}
+.fav-ed-del:hover{color:rgba(255,80,80,0.8)}
 
 /* ── QUICK LAUNCH WHEEL ── */
 #quickWheelOverlay{transition:background 0.25s ease}
@@ -3458,15 +3515,19 @@ body.on-home .taskbar{display:none!important}
 
   <!-- FAV APPS EDITOR MODAL -->
   <div id="favEditorModal" style="display:none;position:fixed;inset:0;z-index:9000;background:rgba(0,0,0,0.85);align-items:center;justify-content:center;backdrop-filter:blur(6px)">
-    <div style="background:#040810;border:1px solid var(--u1-brd2);border-radius:6px;padding:22px;width:380px;max-width:95vw;box-shadow:0 0 60px rgba(0,0,0,0.8)">
+    <div style="background:#040810;border:1px solid var(--u1-brd2);border-radius:6px;padding:22px;width:420px;max-width:95vw;box-shadow:0 0 60px rgba(0,0,0,0.8);max-height:90vh;display:flex;flex-direction:column">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
         <div style="font-family:Orbitron,monospace;font-size:10px;font-weight:700;color:var(--u1-acc);letter-spacing:0.15em">★ CUSTOMIZE SHORTCUTS</div>
         <button onclick="closeFavEditor()" style="background:none;border:none;color:rgba(255,255,255,0.4);cursor:pointer;font-size:14px">✕</button>
       </div>
-      <div style="font-family:Space Mono,monospace;font-size:8px;color:rgba(255,255,255,0.4);margin-bottom:8px;line-height:1.6">one app per line: <span style="color:var(--u1-acc)">emoji|Name|URL</span><br>e.g. 🐙|GitHub|https://github.com</div>
-      <textarea id="favEditorTextarea" style="width:100%;height:160px;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.1);color:#e0f5ef;font-family:Space Mono,monospace;font-size:10px;padding:10px;border-radius:3px;outline:none;resize:vertical;line-height:1.7" placeholder="🐙|GitHub|https://github.com"></textarea>
-      <div style="display:flex;gap:8px;margin-top:12px">
-        <button onclick="saveFavEditor()" style="flex:1;background:var(--u1-acc);color:#000;font-family:Orbitron,monospace;font-size:9px;font-weight:700;padding:10px;border:none;cursor:pointer;border-radius:3px;letter-spacing:0.1em">SAVE</button>
+      <div style="font-family:Space Mono,monospace;font-size:8px;color:rgba(255,255,255,0.35);margin-bottom:10px;line-height:1.6">⚡ = show in quick-launch wheel &nbsp;·&nbsp; ✕ = delete app</div>
+      <div id="favEditorList" style="overflow-y:auto;flex:1;display:flex;flex-direction:column;gap:5px;min-height:0;margin-bottom:12px"></div>
+      <div style="display:flex;gap:6px;margin-bottom:10px">
+        <input id="favEditorAddInp" placeholder="🐙|GitHub|https://github.com" style="flex:1;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.1);color:#e0f5ef;font-family:Space Mono,monospace;font-size:9px;padding:8px 10px;border-radius:3px;outline:none" onkeydown="if(event.key==='Enter')addFavAppFromEditor()">
+        <button onclick="addFavAppFromEditor()" style="background:rgba(0,255,200,0.12);border:1px solid var(--u1-brd2);color:var(--u1-acc);font-family:Orbitron,monospace;font-size:8px;font-weight:700;padding:8px 12px;cursor:pointer;border-radius:3px;letter-spacing:0.08em;white-space:nowrap">+ ADD</button>
+      </div>
+      <div style="display:flex;gap:8px">
+        <button onclick="saveFavEditor()" style="flex:1;background:var(--u1-acc);color:#000;font-family:Orbitron,monospace;font-size:9px;font-weight:700;padding:10px;border:none;cursor:pointer;border-radius:3px;letter-spacing:0.1em">DONE</button>
         <button onclick="closeFavEditor()" style="flex:1;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.1);color:rgba(255,255,255,0.5);font-family:Orbitron,monospace;font-size:9px;font-weight:700;padding:10px;cursor:pointer;border-radius:3px;letter-spacing:0.1em">CANCEL</button>
       </div>
     </div>
@@ -3522,7 +3583,7 @@ body.on-home .taskbar{display:none!important}
 
       <!-- Session chart -->
       <div style="background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.08);border-radius:4px;padding:16px">
-        <div style="font-family:Orbitron,monospace;font-size:10px;font-weight:700;color:rgba(255,255,255,0.6);letter-spacing:0.12em;margin-bottom:12px">⏱ SESSION COMPARISON — </div>
+        <div style="font-family:Orbitron,monospace;font-size:10px;font-weight:700;color:rgba(255,255,255,0.6);letter-spacing:0.12em;margin-bottom:12px">⏱ SESSION COMPARISON — ME vs FRIEND</div>
         <div id="statsSessionChart2"></div>
         <div style="font-family:Space Mono,monospace;font-size:8px;color:rgba(255,255,255,0.3);margin-top:8px">click your bars to select · delete removes that day's sessions</div>
       </div>
