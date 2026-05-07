@@ -281,7 +281,7 @@ function buildSessionCompareChart(el, chartId) {
     </div>
     <div id="${tipId}" style="display:none;position:absolute;top:-30px;left:50%;transform:translateX(-50%);background:rgba(4,8,18,0.97);border:1px solid rgba(0,255,200,0.25);padding:3px 10px;font-family:Space Mono,monospace;font-size:8px;color:#e0f5ef;border-radius:3px;white-space:nowrap;z-index:100;pointer-events:none"></div>
     <div style="display:flex;align-items:flex-end;gap:4px;height:90px;padding:0 2px" id="${chartId}_bars"></div>
-    <div id="${chartId}_delbar" style="display:none;margin-top:8px;padding:6px 8px;background:rgba(255,60,60,0.08);border:1px solid rgba(255,60,60,0.25);border-radius:3px;display:none;align-items:center;justify-content:space-between;gap:8px">
+    <div id="${chartId}_delbar" style="margin-top:8px;padding:6px 8px;background:rgba(255,60,60,0.08);border:1px solid rgba(255,60,60,0.25);border-radius:3px;align-items:center;justify-content:space-between;gap:8px;display:none">
       <span id="${chartId}_dellabel" style="font-family:Space Mono,monospace;font-size:8px;color:rgba(255,255,255,0.6)"></span>
       <button onclick="confirmDeleteSession('${chartId}')" style="background:rgba(255,60,60,0.2);border:1px solid rgba(255,60,60,0.4);color:#ff6060;font-family:Orbitron,monospace;font-size:7px;font-weight:700;padding:4px 10px;cursor:pointer;border-radius:2px;letter-spacing:0.06em">🗑 DELETE</button>
       <button onclick="deselectSession('${chartId}')" style="background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.1);color:rgba(255,255,255,0.35);font-family:Space Mono,monospace;font-size:7px;padding:4px 8px;cursor:pointer;border-radius:2px">✕</button>
@@ -358,32 +358,40 @@ function selectSessionBar(chartId, barEl, date, user, sessions) {
   const delhint = document.getElementById(chartId + '_delhint');
   if (!delbar) return;
 
-  // Deselect if same
+  // Deselect if same bar clicked again
   if (barEl.classList.contains('sess-selected')) {
     deselectSession(chartId);
     return;
   }
 
-  // Clear previous selection
-  document.querySelectorAll('.sess-cmp-bar.sess-selected').forEach(b => b.classList.remove('sess-selected'));
+  // Clear previous selection across all charts
+  document.querySelectorAll('.sess-cmp-bar.sess-selected').forEach(b => {
+    b.classList.remove('sess-selected');
+    b.style.filter = '';
+    b.style.outline = '';
+  });
+
   barEl.classList.add('sess-selected');
-  barEl.style.filter = 'brightness(1.6)';
+  barEl.style.filter = 'brightness(1.7)';
   barEl.style.outline = '2px solid var(--u1-acc)';
 
-  const totalDur = sessions.reduce((a,s)=>a+(s.duration||0),0);
-  dellabel.textContent = `${date} · ${sessions.length} session${sessions.length!==1?'s':''} · ${fmtTime(totalDur)}`;
-  delbar.style.display = 'flex';
-  if (delhint) delhint.style.display = 'inline';
+  const totalDur = sessions.reduce((a,s) => a + (s.duration||0), 0);
+  if (dellabel) dellabel.textContent = `${date} · ${sessions.length} session${sessions.length!==1?'s':''} · ${fmtTime(totalDur)}`;
 
-  // Store pending delete info on el
   delbar.dataset.pendingUser = user;
-  delbar.dataset.pendingKeys = JSON.stringify(sessions.map(s=>s._key));
-  delbar._barEl = barEl;
+  delbar.dataset.pendingKeys = JSON.stringify(sessions.map(s => s._key).filter(Boolean));
+  delbar.style.display = 'flex';
+
+  if (delhint) delhint.style.display = 'inline';
 }
 
 window.deselectSession = function(chartId) {
   const delbar = document.getElementById(chartId + '_delbar');
-  if (delbar) { delbar.style.display = 'none'; delete delbar._barEl; }
+  if (delbar) {
+    delbar.style.display = 'none';
+    delbar.dataset.pendingUser = '';
+    delbar.dataset.pendingKeys = '[]';
+  }
   document.querySelectorAll('.sess-cmp-bar.sess-selected').forEach(b => {
     b.classList.remove('sess-selected');
     b.style.filter = '';
@@ -396,10 +404,10 @@ window.confirmDeleteSession = function(chartId) {
   if (!delbar) return;
   const user = delbar.dataset.pendingUser;
   const keys = JSON.parse(delbar.dataset.pendingKeys || '[]');
-  if (!user || !keys.length) return;
+  if (!user || !keys.length) { showToast('nothing selected'); return; }
   import("https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js").then(({ref, remove}) => {
     keys.forEach(k => {
-      try { remove(ref(db, `sessions/${user}/${k}`)); } catch(e){}
+      if (k) remove(ref(db, `sessions/${user}/${k}`)).catch(()=>{});
     });
     showToast(`🗑 deleted ${keys.length} session${keys.length!==1?'s':''}`);
     deselectSession(chartId);
@@ -474,10 +482,7 @@ function initUI() {
   // populate saved config
   // Start on home tab
   setTimeout(() => {
-    const savedFit = localStorage.getItem('epoch_homefit');
-    homeFitMode = savedFit !== '0'; // default ON
     goTab('home'); listenSessions(); restoreSessionState(); updateSessionUI();
-    applyHomeFit(homeFitMode);
   }, 100);
   // telegram configured internally
   if (settings.driveUrl) document.getElementById('driveUrlInp').value = settings.driveUrl;
@@ -926,7 +931,6 @@ window.goTab = function(tab) {
     renderHomeWidgets();
     startHomeClock();
     renderTodos();
-    applyHomeFit(homeFitMode);
   } else {
     document.body.classList.remove('on-home');
   }
@@ -1312,31 +1316,6 @@ window.openQuickWheelPreview = function() {
   if (!document.body.classList.contains('on-home')) { goTab('home'); setTimeout(openQuickWheel, 200); return; }
   openQuickWheel();
 };
-
-// ── HOME FIT / SCROLL TOGGLE ──
-let homeFitMode = true;
-function applyHomeFit(fit) {
-  homeFitMode = fit;
-  const hv = document.getElementById('homeView');
-  const hd = document.getElementById('homeDashboard');
-  const btn = document.getElementById('homeFitBtn');
-  if (!hv || !hd) return;
-  if (fit) {
-    hv.classList.add('home-noscroll');
-    hd.classList.add('home-fit');
-    hd.classList.remove('home-scroll');
-    hd.style.height = '100%';
-    if (btn) { btn.textContent = '⊟ SCROLL'; btn.style.color = 'var(--u1-acc)'; btn.style.borderColor = 'var(--u1-brd2)'; }
-  } else {
-    hv.classList.remove('home-noscroll');
-    hd.classList.remove('home-fit');
-    hd.classList.add('home-scroll');
-    hd.style.height = 'auto';
-    if (btn) { btn.textContent = '⊞ FIT'; btn.style.color = 'rgba(255,255,255,0.45)'; btn.style.borderColor = 'rgba(255,255,255,0.15)'; }
-  }
-  try { localStorage.setItem('epoch_homefit', fit ? '1' : '0'); } catch(e) {}
-}
-window.toggleHomeFit = function() { applyHomeFit(!homeFitMode); };
 
 window.openFavEditor = function() {
   const apps = getFavApps();
@@ -3083,40 +3062,18 @@ body.ui-glass .taskbar,body.u1-glass .taskbar,body.u2-glass .taskbar{background:
 .qw-slot.qw-ping{animation:qwPing 0.15s ease-out}
 .sess-cmp-bar{transition:filter 0.15s,outline 0.15s,height 0.2s}
 .sess-cmp-bar:hover{filter:brightness(1.35)}
-.sess-cmp-bar.sess-selected{filter:brightness(1.6)!important;outline:2px solid var(--u1-acc);outline-offset:1px}
+.sess-cmp-bar.sess-selected{filter:brightness(1.7)!important;outline:2px solid var(--u1-acc)!important;outline-offset:1px}
 
-/* HOME FIT MODE — no page scroll, grid fills viewport */
-#homeView.home-noscroll { overflow: hidden !important; }
-#homeDashboard.home-fit {
-  overflow: hidden;
-  box-sizing: border-box;
-  padding-bottom: 6px;
-}
-/* SCROLL MODE — free scroll, auto-rows */
-#homeDashboard.home-scroll {
-  overflow: visible;
-  height: auto !important;
-  grid-template-rows: unset !important;
-  grid-template-areas: unset !important;
-  padding-bottom: 80px;
-}
-#homeDashboard.home-scroll > * { grid-area: unset !important; grid-column: span 4; }
-#homeDashboard.home-scroll .home-scroll-only { display: block !important; }
-#homeDashboard.home-fit .home-scroll-only { display: none !important; }
-
-/* Thin scrollbars for widgets */
+/* Thin scrollbars for home widgets */
 #todoList::-webkit-scrollbar,
 #homeRecentPosts::-webkit-scrollbar,
-#favAppsGrid::-webkit-scrollbar,
-#statsSessionChart::-webkit-scrollbar { width: 3px; height: 3px; }
+#favAppsGrid::-webkit-scrollbar { width:3px; }
 #todoList::-webkit-scrollbar-track,
 #homeRecentPosts::-webkit-scrollbar-track,
-#favAppsGrid::-webkit-scrollbar-track,
-#statsSessionChart::-webkit-scrollbar-track { background: transparent; }
+#favAppsGrid::-webkit-scrollbar-track { background:transparent; }
 #todoList::-webkit-scrollbar-thumb,
 #homeRecentPosts::-webkit-scrollbar-thumb,
-#favAppsGrid::-webkit-scrollbar-thumb,
-#statsSessionChart::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.15); border-radius: 2px; }
+#favAppsGrid::-webkit-scrollbar-thumb { background:rgba(255,255,255,0.15);border-radius:2px; }
 .qw-center-ring{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:86px;height:86px;border-radius:50%;background:rgba(6,10,20,0.92);border:2px solid rgba(0,255,200,0.25);box-shadow:0 0 24px rgba(0,255,200,0.12),inset 0 0 12px rgba(0,0,0,0.6);display:flex;align-items:center;justify-content:center;pointer-events:none}
 .qw-center-inner{display:flex;flex-direction:column;align-items:center;gap:2px}
 .qw-center-key{font-family:'Orbitron',monospace;font-size:8px;font-weight:900;color:rgba(0,255,200,0.5);letter-spacing:0.2em}
@@ -3375,10 +3332,8 @@ body.on-home .taskbar{display:none!important}
 
   <!-- HOME VIEW — IRON MAN DASHBOARD -->
   <div id="homeView" style="display:none;flex:1;min-height:0;overflow:hidden;background:transparent">
-    <!-- fit/scroll toggle -->
-    <button id="homeFitBtn" onclick="toggleHomeFit()" title="toggle fit/scroll" style="position:absolute;bottom:90px;right:12px;z-index:200;background:rgba(0,0,0,0.7);border:1px solid rgba(255,255,255,0.15);color:rgba(255,255,255,0.45);font-family:Space Mono,monospace;font-size:8px;padding:4px 8px;cursor:pointer;border-radius:3px;letter-spacing:0.06em;backdrop-filter:blur(4px);transition:all 0.2s">⊞ FIT</button>
-    <div id="homeDashboard" class="home-fit" style="height:100%;padding:6px 10px 6px;display:grid;grid-template-columns:repeat(12,1fr);gap:6px;max-width:1800px;width:100%;margin:0 auto;
-      grid-template-rows: minmax(0,1.8fr) minmax(0,1.2fr) minmax(0,1.4fr) minmax(0,1.4fr);
+    <div id="homeDashboard" style="height:100%;padding:6px 10px;box-sizing:border-box;display:grid;grid-template-columns:repeat(12,1fr);gap:6px;width:100%;
+      grid-template-rows: minmax(0,1.8fr) minmax(0,1.1fr) minmax(0,1.4fr) minmax(0,1.5fr);
       grid-template-areas:
         'clk clk clk clk rec rec rec rec cmp cmp cmp cmp'
         'mst mst mst fst fst fst act act act act act act'
@@ -3451,20 +3406,6 @@ body.on-home .taskbar{display:none!important}
         <div style="position:absolute;top:0;left:0;right:0;height:1px;background:linear-gradient(90deg,transparent,var(--u1-acc),transparent);opacity:0.4"></div>
         <div style="font-family:Orbitron,monospace;font-size:7px;font-weight:700;color:rgba(255,255,255,0.4);letter-spacing:0.15em;margin-bottom:6px">📊 14-DAY ACTIVITY</div>
         <div id="homeBarChart"></div>
-      </div>
-
-      <!-- MY 30-DAY HEATMAP — hidden in fit mode, kept for scroll mode -->
-      <div class="home-scroll-only" style="grid-column:span 4;background:rgba(0,255,200,0.02);border:1px solid var(--u1-brd);border-radius:4px;padding:10px;position:relative;overflow:hidden">
-        <div style="position:absolute;top:0;left:0;right:0;height:1px;background:linear-gradient(90deg,transparent,var(--u1-acc),transparent);opacity:0.4"></div>
-        <div style="font-family:Orbitron,monospace;font-size:7px;font-weight:700;color:var(--u1-acc);letter-spacing:0.15em;margin-bottom:6px">🗓 MY 30D GRID</div>
-        <div id="homeMiniHmap"></div>
-      </div>
-
-      <!-- FRIEND 30-DAY HEATMAP — hidden in fit mode -->
-      <div class="home-scroll-only" style="grid-column:span 4;background:var(--u2-bg);border:1px solid var(--u2-brd);border-radius:4px;padding:10px;position:relative;overflow:hidden">
-        <div style="position:absolute;top:0;left:0;right:0;height:1px;background:linear-gradient(90deg,transparent,var(--u2-acc),transparent);opacity:0.4"></div>
-        <div style="font-family:Orbitron,monospace;font-size:7px;font-weight:700;color:var(--u2-acc);letter-spacing:0.15em;margin-bottom:6px">🗓 FRIEND 30D GRID</div>
-        <div id="homeMiniHmapFr"></div>
       </div>
 
       <!-- SESSION CHART -->
