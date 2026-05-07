@@ -1335,12 +1335,21 @@ window.closeFavEditor = function() {
   if (modal) modal.style.display = 'none';
 };
 
+let fedDragSrc = null;
+
 function renderFavEditorCards(apps) {
   const list = document.getElementById('favEditorList');
   if (!list) return;
-  list.innerHTML = apps.map((a, i) => {
+  list.innerHTML = '';
+  apps.forEach((a, i) => {
     const inWheel = a.wheel !== false;
-    return `<div class="fav-ed-card" id="fedCard${i}" data-idx="${i}" data-wheel="${inWheel}">
+    const card = document.createElement('div');
+    card.className = 'fav-ed-card';
+    card.id = 'fedCard' + i;
+    card.dataset.idx = i;
+    card.draggable = true;
+    card.innerHTML = `
+      <span class="fav-ed-drag" title="drag to reorder">⠿</span>
       <span class="fav-ed-icon">${a.icon}</span>
       <div class="fav-ed-info">
         <div class="fav-ed-name">${a.name}</div>
@@ -1348,8 +1357,37 @@ function renderFavEditorCards(apps) {
       </div>
       <button class="fav-ed-wheel-btn ${inWheel ? 'on' : ''}" onclick="toggleWheelApp(${i})" title="${inWheel ? 'remove from wheel' : 'add to wheel'}">⚡</button>
       <button class="fav-ed-del" onclick="deleteFavApp(${i})" title="delete">✕</button>
-    </div>`;
-  }).join('');
+    `;
+    card.addEventListener('dragstart', e => {
+      fedDragSrc = i;
+      card.classList.add('fav-ed-dragging');
+      e.dataTransfer.effectAllowed = 'move';
+    });
+    card.addEventListener('dragend', () => {
+      card.classList.remove('fav-ed-dragging');
+      list.querySelectorAll('.fav-ed-card').forEach(c => c.classList.remove('fav-ed-over'));
+    });
+    card.addEventListener('dragover', e => {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+      list.querySelectorAll('.fav-ed-card').forEach(c => c.classList.remove('fav-ed-over'));
+      card.classList.add('fav-ed-over');
+    });
+    card.addEventListener('dragleave', () => card.classList.remove('fav-ed-over'));
+    card.addEventListener('drop', e => {
+      e.preventDefault();
+      card.classList.remove('fav-ed-over');
+      const toIdx = parseInt(card.dataset.idx);
+      if (fedDragSrc === null || fedDragSrc === toIdx) return;
+      const apps2 = getFavApps();
+      const [moved] = apps2.splice(fedDragSrc, 1);
+      apps2.splice(toIdx, 0, moved);
+      saveFavAppsData(apps2);
+      renderFavEditorCards(apps2);
+      renderFavApps();
+    });
+    list.appendChild(card);
+  });
 }
 
 window.toggleWheelApp = function(idx) {
@@ -3086,8 +3124,12 @@ body.ui-glass .taskbar,body.u1-glass .taskbar,body.u2-glass .taskbar{background:
 .fav-app-item:hover{background:var(--u1-acc2);border-color:var(--u1-brd2);transform:translateY(-1px)}
 .fav-add-btn{opacity:0.5}
 .fav-add-btn:hover{opacity:1}
-.fav-ed-card{display:flex;align-items:center;gap:8px;padding:7px 10px;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.07);border-radius:4px;transition:background 0.15s}
+.fav-ed-card{display:flex;align-items:center;gap:8px;padding:7px 10px;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.07);border-radius:4px;transition:background 0.15s;cursor:default}
 .fav-ed-card:hover{background:rgba(255,255,255,0.05)}
+.fav-ed-card.fav-ed-dragging{opacity:0.4}
+.fav-ed-card.fav-ed-over{border-color:var(--u1-acc);background:rgba(0,255,200,0.06)}
+.fav-ed-drag{font-size:14px;color:rgba(255,255,255,0.2);cursor:grab;flex-shrink:0;user-select:none;line-height:1}
+.fav-ed-drag:active{cursor:grabbing}
 .fav-ed-icon{font-size:18px;flex-shrink:0;width:24px;text-align:center}
 .fav-ed-info{flex:1;min-width:0}
 .fav-ed-name{font-family:Space Mono,monospace;font-size:9px;color:#e0f5ef;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -3583,7 +3625,7 @@ body.on-home .taskbar{display:none!important}
 
       <!-- Session chart -->
       <div style="background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.08);border-radius:4px;padding:16px">
-        <div style="font-family:Orbitron,monospace;font-size:10px;font-weight:700;color:rgba(255,255,255,0.6);letter-spacing:0.12em;margin-bottom:12px">⏱ SESSION COMPARISON </div>
+        <div style="font-family:Orbitron,monospace;font-size:10px;font-weight:700;color:rgba(255,255,255,0.6);letter-spacing:0.12em;margin-bottom:12px">⏱ SESSION COMPARISON — ME vs FRIEND</div>
         <div id="statsSessionChart2"></div>
         <div style="font-family:Space Mono,monospace;font-size:8px;color:rgba(255,255,255,0.3);margin-top:8px">click your bars to select · delete removes that day's sessions</div>
       </div>
