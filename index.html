@@ -931,8 +931,7 @@ let wheelMouseX = 0, wheelMouseY = 0;
 const WHEEL_HOLD_MS = 180; // ms hold to open
 
 function getWheelApps() {
-  const apps = getFavApps();
-  return apps.slice(0, 6); // max 6 slots
+  return getFavApps(); // use all custom apps
 }
 
 function openQuickWheel() {
@@ -971,9 +970,9 @@ function renderWheelSlots() {
   const slotWrap = document.getElementById('qwSlots');
   if (!slotWrap) return;
   slotWrap.innerHTML = '';
-  const R = 118; // radius
+  const R = 115; // midpoint between r1=48 and r2=182
   for (let i = 0; i < count; i++) {
-    const angle = ((i + 0.5) / count) * Math.PI * 2 - Math.PI / 2;
+    const angle = ((i + 0.5) / count) * Math.PI * 2 - Math.PI / 2; // center of sector
     const x = Math.cos(angle) * R;
     const y = Math.sin(angle) * R;
     const a = apps[i];
