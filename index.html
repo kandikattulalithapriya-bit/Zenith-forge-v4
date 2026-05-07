@@ -110,13 +110,48 @@ function fmtTime(ms) {
   return h ? `${h}h ${m%60}m ${s%60}s` : m ? `${m}m ${s%60}s` : `${s}s`;
 }
 
+// ── SESSION PERSISTENCE (survives tab close) ──
+function saveSessionState() {
+  try {
+    if (sessionActive) {
+      localStorage.setItem('epoch_session', JSON.stringify({
+        sessionActive, sessionPaused,
+        sessionStart, sessionPauseStart,
+        sessionPausedMs, sessionLog
+      }));
+    } else {
+      localStorage.removeItem('epoch_session');
+    }
+  } catch(e) {}
+}
+function restoreSessionState() {
+  try {
+    const raw = localStorage.getItem('epoch_session');
+    if (!raw) return;
+    const s = JSON.parse(raw);
+    if (!s.sessionActive) return;
+    sessionActive = s.sessionActive;
+    sessionPaused = s.sessionPaused;
+    sessionStart = s.sessionStart;
+    sessionPauseStart = s.sessionPauseStart;
+    sessionPausedMs = s.sessionPausedMs || 0;
+    sessionLog = s.sessionLog || [];
+    // If it was running (not paused), it kept ticking while tab was closed — no adjustment needed
+    // If it was paused, pauseStart is still valid
+    sessionTimer = setInterval(() => { updateSessionUI(); saveSessionState(); }, 1000);
+    const sw = document.getElementById('sessionWidget');
+    if (sw) sw.classList.add('active');
+    showToast('⏱ session restored');
+  } catch(e) {}
+}
+
 window.startSession = function() {
   if (sessionActive) return;
   sessionActive = true; sessionPaused = false;
   sessionStart = Date.now(); sessionPausedMs = 0; sessionLog = [];
   sessionLog.push({action:'started', ts: Date.now()});
   updateSessionUI();
-  sessionTimer = setInterval(updateSessionUI, 1000);
+  sessionTimer = setInterval(() => { updateSessionUI(); saveSessionState(); }, 1000);
   showToast('🎬 session started');
   // Show session widget on home
   const sw = document.getElementById('sessionWidget');
@@ -136,6 +171,7 @@ window.pauseSession = function() {
     showToast('▶ session resumed');
   }
   updateSessionUI();
+  saveSessionState();
 };
 
 window.stopSession = function() {
@@ -144,6 +180,7 @@ window.stopSession = function() {
   sessionLog.push({action:'stopped', ts: Date.now()});
   const elapsed = getSessionElapsed();
   sessionActive = false; sessionPaused = false;
+  localStorage.removeItem('epoch_session');
   updateSessionUI();
   const sw = document.getElementById('sessionWidget');
   if (sw) sw.classList.remove('active');
@@ -177,7 +214,12 @@ function listenSessions() {
     try {
       onValue(ref(db, 'sessions'), snap => {
         const d = snap.val() || {};
-        allSessions = {Monish: Object.values(d.Monish||{}), Prashanth: Object.values(d.Prashanth||{})};
+        allSessions = {
+          Monish: Object.values(d.Monish||{}),
+          Prashanth: Object.values(d.Prashanth||{}),
+          Monish_raw: d.Monish||{},
+          Prashanth_raw: d.Prashanth||{}
+        };
         updateSessionStatsUI();
       });
     } catch(e) {}
@@ -193,11 +235,19 @@ function updateSessionStatsUI() {
     const maxDur = Math.max(...last7.map(s => s.duration || 0)) || 1;
     const tipId = id+'_tip';
     el.style.position='relative';
+    // Get the actual Firebase keys for the last 7 sessions (for deletion)
+    const mineEntries = Object.entries(allSessions[ME+'_raw'] || {});
+    const last7Keys = mineEntries.slice(-7).map(([k]) => k);
     el.innerHTML = `<div id="${tipId}" style="display:none;position:absolute;top:-28px;background:rgba(4,8,18,0.97);border:1px solid rgba(0,255,200,0.25);padding:3px 9px;font-family:Space Mono,monospace;font-size:8px;color:#e0f5ef;border-radius:3px;white-space:nowrap;z-index:100;pointer-events:none"></div>` +
       '<div style="display:flex;align-items:flex-end;gap:6px;height:80px;padding:0 4px">' +
       last7.map((s,i) => {
         const h = Math.round((s.duration / maxDur) * 70) + 10;
-        return `<div class="sess-bar" data-dur="${fmtTime(s.duration||0)}" data-date="${s.date||''}" style="flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;cursor:default"><div style="width:100%;height:${h}px;background:var(--u1-accl);border:1px solid var(--u1-brd2);border-radius:2px;transition:all 0.3s"></div><div style="font-family:Space Mono,monospace;font-size:7px;color:rgba(255,255,255,0.4)">${s.date||''}</div></div>`;
+        const fbKey = last7Keys[i] || '';
+        return `<div class="sess-bar" data-dur="${fmtTime(s.duration||0)}" data-date="${s.date||''}" data-fbkey="${fbKey}" style="flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;cursor:default;position:relative">
+          <button class="sess-del-btn" data-fbkey="${fbKey}" title="remove session" style="display:none;position:absolute;top:-18px;left:50%;transform:translateX(-50%);background:rgba(255,60,60,0.85);border:none;color:#fff;font-size:8px;width:14px;height:14px;border-radius:50%;cursor:pointer;line-height:1;padding:0">✕</button>
+          <div style="width:100%;height:${h}px;background:var(--u1-accl);border:1px solid var(--u1-brd2);border-radius:2px;transition:all 0.3s"></div>
+          <div style="font-family:Space Mono,monospace;font-size:7px;color:rgba(255,255,255,0.4)">${s.date||''}</div>
+        </div>`;
       }).join('') + '</div>';
     const tip = document.getElementById(tipId);
     el.querySelectorAll('.sess-bar').forEach(bar => {
@@ -205,11 +255,34 @@ function updateSessionStatsUI() {
         tip.textContent = `${bar.dataset.date}: ${bar.dataset.dur}`;
         tip.style.display='block';
         tip.style.left=(bar.offsetLeft+bar.offsetWidth/2)+'px';
+        const delBtn = bar.querySelector('.sess-del-btn');
+        if (delBtn) delBtn.style.display='block';
       });
-      bar.addEventListener('mouseleave', () => { tip.style.display='none'; });
+      bar.addEventListener('mouseleave', () => {
+        tip.style.display='none';
+        const delBtn = bar.querySelector('.sess-del-btn');
+        if (delBtn) delBtn.style.display='none';
+      });
+      const delBtn = bar.querySelector('.sess-del-btn');
+      if (delBtn) {
+        delBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const fbKey = delBtn.dataset.fbkey;
+          if (fbKey) removeSession(fbKey);
+        });
+      }
     });
   });
 }
+
+window.removeSession = function(fbKey) {
+  if (!fbKey) return;
+  import("https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js").then(({ref, remove}) => {
+    remove(ref(db, `sessions/${ME}/${fbKey}`)).then(() => {
+      showToast('🗑 session removed');
+    }).catch(() => showToast('⚠ could not remove session'));
+  }).catch(()=>{});
+};
 
 let imgData = null;
 let allPosts = { Monish: {}, Prashanth: {} };
@@ -278,7 +351,7 @@ function initUI() {
   document.getElementById('tog-quotes').classList.toggle('on', settings.quotes);
   // populate saved config
   // Start on home tab
-  setTimeout(() => { goTab('home'); listenSessions(); updateSessionUI(); }, 100);
+  setTimeout(() => { goTab('home'); listenSessions(); updateSessionUI(); restoreSessionState(); }, 100);
   // telegram configured internally
   if (settings.driveUrl) document.getElementById('driveUrlInp').value = settings.driveUrl;
 }
