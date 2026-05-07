@@ -96,6 +96,39 @@ let sessionTimer = null;
 let sessionLog = []; // [{action, ts}]
 let pendingPostAfterSession = false;
 
+// ── SESSION PERSISTENCE (survives tab close / refresh) ──
+function saveSessionState() {
+  try {
+    localStorage.setItem('epoch_session', JSON.stringify({
+      sessionActive, sessionPaused,
+      sessionStart, sessionPauseStart,
+      sessionPausedMs, sessionLog
+    }));
+  } catch(e) {}
+}
+function clearSessionState() {
+  try { localStorage.removeItem('epoch_session'); } catch(e) {}
+}
+function restoreSessionState() {
+  try {
+    const raw = localStorage.getItem('epoch_session');
+    if (!raw) return;
+    const s = JSON.parse(raw);
+    if (!s.sessionActive) { clearSessionState(); return; }
+    sessionActive     = s.sessionActive   ?? false;
+    sessionPaused     = s.sessionPaused   ?? false;
+    sessionStart      = s.sessionStart    ?? null;
+    sessionPauseStart = s.sessionPauseStart ?? null;
+    sessionPausedMs   = s.sessionPausedMs ?? 0;
+    sessionLog        = s.sessionLog      ?? [];
+    // Wall-clock elapsed handles time that passed while tab was closed automatically
+    sessionTimer = setInterval(updateSessionUI, 1000);
+    const sw = document.getElementById('sessionWidget');
+    if (sw) sw.classList.add('active');
+    showToast('🎬 session restored — still running');
+  } catch(e) { clearSessionState(); }
+}
+
 function getSessionElapsed() {
   if (!sessionStart) return 0;
   const now = Date.now();
@@ -115,6 +148,7 @@ window.startSession = function() {
   sessionActive = true; sessionPaused = false;
   sessionStart = Date.now(); sessionPausedMs = 0; sessionLog = [];
   sessionLog.push({action:'started', ts: Date.now()});
+  saveSessionState();
   updateSessionUI();
   sessionTimer = setInterval(updateSessionUI, 1000);
   showToast('🎬 session started');
@@ -135,6 +169,7 @@ window.pauseSession = function() {
     sessionLog.push({action:'resumed', ts: Date.now()});
     showToast('▶ session resumed');
   }
+  saveSessionState();
   updateSessionUI();
 };
 
@@ -144,6 +179,7 @@ window.stopSession = function() {
   sessionLog.push({action:'stopped', ts: Date.now()});
   const elapsed = getSessionElapsed();
   sessionActive = false; sessionPaused = false;
+  clearSessionState();
   updateSessionUI();
   const sw = document.getElementById('sessionWidget');
   if (sw) sw.classList.remove('active');
@@ -278,7 +314,7 @@ function initUI() {
   document.getElementById('tog-quotes').classList.toggle('on', settings.quotes);
   // populate saved config
   // Start on home tab
-  setTimeout(() => { goTab('home'); listenSessions(); updateSessionUI(); }, 100);
+  setTimeout(() => { goTab('home'); listenSessions(); restoreSessionState(); updateSessionUI(); }, 100);
   // telegram configured internally
   if (settings.driveUrl) document.getElementById('driveUrlInp').value = settings.driveUrl;
   // Quick launch key
