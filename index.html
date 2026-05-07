@@ -85,7 +85,7 @@ const UI_STYLES = [
 // Color wheels — free pick via HSL
 let wheelState = { u1: '#00ffc8', u2: '#ff00cc' };
 
-const APP_VERSION = 'v26';
+const APP_VERSION = 'v27';
 // ── SESSION RECORDING STATE ──
 let sessionActive = false;
 let sessionPaused = false;
@@ -110,48 +110,13 @@ function fmtTime(ms) {
   return h ? `${h}h ${m%60}m ${s%60}s` : m ? `${m}m ${s%60}s` : `${s}s`;
 }
 
-// ── SESSION PERSISTENCE (survives tab close) ──
-function saveSessionState() {
-  try {
-    if (sessionActive) {
-      localStorage.setItem('epoch_session', JSON.stringify({
-        sessionActive, sessionPaused,
-        sessionStart, sessionPauseStart,
-        sessionPausedMs, sessionLog
-      }));
-    } else {
-      localStorage.removeItem('epoch_session');
-    }
-  } catch(e) {}
-}
-function restoreSessionState() {
-  try {
-    const raw = localStorage.getItem('epoch_session');
-    if (!raw) return;
-    const s = JSON.parse(raw);
-    if (!s.sessionActive) return;
-    sessionActive = s.sessionActive;
-    sessionPaused = s.sessionPaused;
-    sessionStart = s.sessionStart;
-    sessionPauseStart = s.sessionPauseStart;
-    sessionPausedMs = s.sessionPausedMs || 0;
-    sessionLog = s.sessionLog || [];
-    // If it was running (not paused), it kept ticking while tab was closed — no adjustment needed
-    // If it was paused, pauseStart is still valid
-    sessionTimer = setInterval(() => { updateSessionUI(); saveSessionState(); }, 1000);
-    const sw = document.getElementById('sessionWidget');
-    if (sw) sw.classList.add('active');
-    showToast('⏱ session restored');
-  } catch(e) {}
-}
-
 window.startSession = function() {
   if (sessionActive) return;
   sessionActive = true; sessionPaused = false;
   sessionStart = Date.now(); sessionPausedMs = 0; sessionLog = [];
   sessionLog.push({action:'started', ts: Date.now()});
   updateSessionUI();
-  sessionTimer = setInterval(() => { updateSessionUI(); saveSessionState(); }, 1000);
+  sessionTimer = setInterval(updateSessionUI, 1000);
   showToast('🎬 session started');
   // Show session widget on home
   const sw = document.getElementById('sessionWidget');
@@ -171,7 +136,6 @@ window.pauseSession = function() {
     showToast('▶ session resumed');
   }
   updateSessionUI();
-  saveSessionState();
 };
 
 window.stopSession = function() {
@@ -180,7 +144,6 @@ window.stopSession = function() {
   sessionLog.push({action:'stopped', ts: Date.now()});
   const elapsed = getSessionElapsed();
   sessionActive = false; sessionPaused = false;
-  localStorage.removeItem('epoch_session');
   updateSessionUI();
   const sw = document.getElementById('sessionWidget');
   if (sw) sw.classList.remove('active');
@@ -214,12 +177,7 @@ function listenSessions() {
     try {
       onValue(ref(db, 'sessions'), snap => {
         const d = snap.val() || {};
-        allSessions = {
-          Monish: Object.values(d.Monish||{}),
-          Prashanth: Object.values(d.Prashanth||{}),
-          Monish_raw: d.Monish||{},
-          Prashanth_raw: d.Prashanth||{}
-        };
+        allSessions = {Monish: Object.values(d.Monish||{}), Prashanth: Object.values(d.Prashanth||{})};
         updateSessionStatsUI();
       });
     } catch(e) {}
@@ -235,61 +193,23 @@ function updateSessionStatsUI() {
     const maxDur = Math.max(...last7.map(s => s.duration || 0)) || 1;
     const tipId = id+'_tip';
     el.style.position='relative';
-    // Get the actual Firebase keys for the last 7 sessions (for deletion)
-    const mineEntries = Object.entries(allSessions[ME+'_raw'] || {});
-    const last7Keys = mineEntries.slice(-7).map(([k]) => k);
     el.innerHTML = `<div id="${tipId}" style="display:none;position:absolute;top:-28px;background:rgba(4,8,18,0.97);border:1px solid rgba(0,255,200,0.25);padding:3px 9px;font-family:Space Mono,monospace;font-size:8px;color:#e0f5ef;border-radius:3px;white-space:nowrap;z-index:100;pointer-events:none"></div>` +
       '<div style="display:flex;align-items:flex-end;gap:6px;height:80px;padding:0 4px">' +
       last7.map((s,i) => {
         const h = Math.round((s.duration / maxDur) * 70) + 10;
-        const fbKey = last7Keys[i] || '';
-        return `<div class="sess-bar" data-dur="${fmtTime(s.duration||0)}" data-date="${s.date||''}" data-fbkey="${fbKey}" style="flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;cursor:default;position:relative">
-          <button class="sess-del-btn" data-fbkey="${fbKey}" title="remove session" style="display:none;position:absolute;top:-18px;left:50%;transform:translateX(-50%);background:rgba(255,60,60,0.85);border:none;color:#fff;font-size:8px;width:14px;height:14px;border-radius:50%;cursor:pointer;line-height:1;padding:0">✕</button>
-          <div style="width:100%;height:${h}px;background:var(--u1-accl);border:1px solid var(--u1-brd2);border-radius:2px;transition:all 0.3s"></div>
-          <div style="font-family:Space Mono,monospace;font-size:7px;color:rgba(255,255,255,0.4)">${s.date||''}</div>
-        </div>`;
+        return `<div class="sess-bar" data-dur="${fmtTime(s.duration||0)}" data-date="${s.date||''}" style="flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;cursor:default"><div style="width:100%;height:${h}px;background:var(--u1-accl);border:1px solid var(--u1-brd2);border-radius:2px;transition:all 0.3s"></div><div style="font-family:Space Mono,monospace;font-size:7px;color:rgba(255,255,255,0.4)">${s.date||''}</div></div>`;
       }).join('') + '</div>';
     const tip = document.getElementById(tipId);
     el.querySelectorAll('.sess-bar').forEach(bar => {
-      const delBtn = bar.querySelector('.sess-del-btn');
-      let hideTimer = null;
-      function showBar() {
-        clearTimeout(hideTimer);
+      bar.addEventListener('mouseenter', () => {
         tip.textContent = `${bar.dataset.date}: ${bar.dataset.dur}`;
         tip.style.display='block';
         tip.style.left=(bar.offsetLeft+bar.offsetWidth/2)+'px';
-        if (delBtn) delBtn.style.display='block';
-      }
-      function scheduleHide() {
-        hideTimer = setTimeout(() => {
-          tip.style.display='none';
-          if (delBtn) delBtn.style.display='none';
-        }, 150);
-      }
-      bar.addEventListener('mouseenter', showBar);
-      bar.addEventListener('mouseleave', scheduleHide);
-      if (delBtn) {
-        delBtn.addEventListener('mouseenter', () => clearTimeout(hideTimer));
-        delBtn.addEventListener('mouseleave', scheduleHide);
-        delBtn.addEventListener('click', (e) => {
-          e.stopPropagation();
-          clearTimeout(hideTimer);
-          const fbKey = delBtn.dataset.fbkey;
-          if (fbKey) removeSession(fbKey);
-        });
-      }
+      });
+      bar.addEventListener('mouseleave', () => { tip.style.display='none'; });
     });
   });
 }
-
-window.removeSession = function(fbKey) {
-  if (!fbKey) return;
-  import("https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js").then(({ref, remove}) => {
-    remove(ref(db, `sessions/${ME}/${fbKey}`)).then(() => {
-      showToast('🗑 session removed');
-    }).catch(() => showToast('⚠ could not remove session'));
-  }).catch(()=>{});
-};
 
 let imgData = null;
 let allPosts = { Monish: {}, Prashanth: {} };
@@ -297,7 +217,7 @@ let streaks = { Monish: 0, Prashanth: 0 };
 let lastPostDate = { Monish: '', Prashanth: '' };
 let hmapRange = { Monish: 30, Prashanth: 30 };
 let daysPer = { Monish: 1, Prashanth: 1 };
-let settings = { uiStyle:'default', u1Hex:'#00ffc8', u2Hex:'#ff00cc', appName:'ZENITH-FORGE', quotes:true, tgToken:'8793839990:AAEtmAlQ1-BlSyuBJ1cKmVme6Q7YLE7PCnw', tgChat:'-5191928580', driveUrl:'' };
+let settings = { uiStyle:'default', u1Hex:'#00ffc8', u2Hex:'#ff00cc', appName:'ZENITH-FORGE', quotes:true, tgToken:'8793839990:AAEtmAlQ1-BlSyuBJ1cKmVme6Q7YLE7PCnw', tgChat:'-5191928580', driveUrl:'', quickLaunchKey:'q' };
 
 function FRIEND() { return ME === 'Monish' ? 'Prashanth' : 'Monish'; }
 
@@ -358,9 +278,12 @@ function initUI() {
   document.getElementById('tog-quotes').classList.toggle('on', settings.quotes);
   // populate saved config
   // Start on home tab
-  setTimeout(() => { goTab('home'); listenSessions(); updateSessionUI(); restoreSessionState(); }, 100);
+  setTimeout(() => { goTab('home'); listenSessions(); updateSessionUI(); }, 100);
   // telegram configured internally
   if (settings.driveUrl) document.getElementById('driveUrlInp').value = settings.driveUrl;
+  // Quick launch key
+  const qlInp = document.getElementById('qlKeyInp'); if(qlInp) qlInp.value = settings.quickLaunchKey || 'q';
+  const qlDisp = document.getElementById('qlKeyDisplay'); if(qlDisp) qlDisp.textContent = (settings.quickLaunchKey || 'q').toUpperCase();
 }
 
 // ── FIREBASE LISTENERS ──
@@ -998,6 +921,197 @@ function renderFavApps() {
     <span style="font-family:Space Mono,monospace;font-size:6px;color:rgba(255,255,255,0.35)">edit</span>
   </div>`;
 }
+
+// ── GTA5-STYLE QUICK LAUNCH WHEEL ──
+let wheelOpen = false;
+let wheelHeld = false;
+let wheelHoldTimer = null;
+let wheelSelectedIdx = -1;
+let wheelMouseX = 0, wheelMouseY = 0;
+const WHEEL_HOLD_MS = 180; // ms hold to open
+
+function getWheelApps() {
+  const apps = getFavApps();
+  return apps.slice(0, 6); // max 6 slots
+}
+
+function openQuickWheel() {
+  if (wheelOpen) return;
+  wheelOpen = true;
+  wheelSelectedIdx = -1;
+  const overlay = document.getElementById('quickWheelOverlay');
+  if (!overlay) return;
+  overlay.style.display = 'flex';
+  requestAnimationFrame(() => overlay.classList.add('qw-visible'));
+  renderWheelSlots();
+  showToast('⚡ quick launch — aim & release');
+}
+
+function closeQuickWheel(launch) {
+  if (!wheelOpen) return;
+  wheelOpen = false;
+  const overlay = document.getElementById('quickWheelOverlay');
+  if (!overlay) return;
+  overlay.classList.remove('qw-visible');
+  setTimeout(() => { overlay.style.display = 'none'; }, 260);
+  if (launch && wheelSelectedIdx >= 0) {
+    const apps = getWheelApps();
+    const app = apps[wheelSelectedIdx];
+    if (app && app.url) {
+      setTimeout(() => window.open(app.url, '_blank'), 120);
+    }
+  }
+  wheelSelectedIdx = -1;
+  updateWheelHighlight(-1);
+}
+
+function renderWheelSlots() {
+  const apps = getWheelApps();
+  const count = apps.length;
+  const slotWrap = document.getElementById('qwSlots');
+  if (!slotWrap) return;
+  slotWrap.innerHTML = '';
+  const R = 118; // radius
+  for (let i = 0; i < count; i++) {
+    const angle = (i / count) * Math.PI * 2 - Math.PI / 2;
+    const x = Math.cos(angle) * R;
+    const y = Math.sin(angle) * R;
+    const a = apps[i];
+    const slot = document.createElement('div');
+    slot.className = 'qw-slot';
+    slot.id = 'qwSlot' + i;
+    slot.dataset.x = x;
+    slot.dataset.y = y;
+    // Start collapsed at center
+    slot.style.transform = `translate(-50%, -50%) scale(0.5)`;
+    slot.style.transitionDelay = `${i * 28}ms`;
+    slot.innerHTML = `<div class="qw-slot-icon">${a.icon}</div><div class="qw-slot-name">${a.name}</div>`;
+    slotWrap.appendChild(slot);
+    // Animate out after paint
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      slot.style.transform = `translate(calc(-50% + ${x}px), calc(-50% + ${y}px)) scale(1)`;
+    }));
+  }
+  // Sector lines
+  const svg = document.getElementById('qwSectors');
+  if (svg) {
+    const cx = 200, cy = 200, r1 = 48, r2 = 182;
+    let paths = '';
+    for (let i = 0; i < count; i++) {
+      const a1 = (i / count) * Math.PI * 2 - Math.PI / 2;
+      const a2 = ((i + 1) / count) * Math.PI * 2 - Math.PI / 2;
+      const x1 = cx + Math.cos(a1) * r2, y1 = cy + Math.sin(a1) * r2;
+      const x2 = cx + Math.cos(a2) * r2, y2 = cy + Math.sin(a2) * r2;
+      const ix1 = cx + Math.cos(a1) * r1, iy1 = cy + Math.sin(a1) * r1;
+      const ix2 = cx + Math.cos(a2) * r2, iy2 = cy + Math.sin(a2) * r2;
+      paths += `<path class="qw-sector" id="qwSec${i}" d="M${cx + Math.cos(a1)*r1} ${cy + Math.sin(a1)*r1} L${cx + Math.cos(a1)*r2} ${cy + Math.sin(a1)*r2} A${r2} ${r2} 0 0 1 ${cx + Math.cos(a2)*r2} ${cy + Math.sin(a2)*r2} L${cx + Math.cos(a2)*r1} ${cy + Math.sin(a2)*r1} A${r1} ${r1} 0 0 0 ${cx + Math.cos(a1)*r1} ${cy + Math.sin(a1)*r1} Z"/>`;
+    }
+    // Divider lines
+    for (let i = 0; i < count; i++) {
+      const a = (i / count) * Math.PI * 2 - Math.PI / 2;
+      paths += `<line class="qw-divider" x1="${cx + Math.cos(a)*r1}" y1="${cy + Math.sin(a)*r1}" x2="${cx + Math.cos(a)*r2}" y2="${cy + Math.sin(a)*r2}"/>`;
+    }
+    svg.innerHTML = paths;
+  }
+}
+
+function updateWheelHighlight(idx) {
+  const apps = getWheelApps();
+  for (let i = 0; i < apps.length; i++) {
+    const slot = document.getElementById('qwSlot' + i);
+    const sec = document.getElementById('qwSec' + i);
+    const active = i === idx;
+    if (slot) {
+      slot.classList.toggle('qw-active', active);
+      const x = parseFloat(slot.dataset.x) || 0;
+      const y = parseFloat(slot.dataset.y) || 0;
+      slot.style.transform = `translate(calc(-50% + ${x}px), calc(-50% + ${y}px)) scale(${active ? 1.13 : 1})`;
+    }
+    if (sec) sec.classList.toggle('qw-sec-active', active);
+  }
+  const label = document.getElementById('qwCenterLabel');
+  if (label) {
+    if (idx >= 0 && apps[idx]) {
+      label.textContent = apps[idx].name;
+      label.style.opacity = '1';
+    } else {
+      label.textContent = 'QUICK LAUNCH';
+      label.style.opacity = '0.35';
+    }
+  }
+}
+
+function onWheelMouseMove(e) {
+  if (!wheelOpen) return;
+  const overlay = document.getElementById('quickWheelOverlay');
+  if (!overlay) return;
+  const rect = overlay.getBoundingClientRect();
+  const cx = rect.left + rect.width / 2;
+  const cy = rect.top + rect.height / 2;
+  const dx = e.clientX - cx;
+  const dy = e.clientY - cy;
+  const dist = Math.sqrt(dx*dx + dy*dy);
+  if (dist < 40) { updateWheelHighlight(-1); wheelSelectedIdx = -1; return; }
+  const apps = getWheelApps();
+  const count = apps.length;
+  let angle = Math.atan2(dy, dx) + Math.PI / 2;
+  if (angle < 0) angle += Math.PI * 2;
+  const idx = Math.floor((angle / (Math.PI * 2)) * count) % count;
+  if (idx !== wheelSelectedIdx) {
+    wheelSelectedIdx = idx;
+    updateWheelHighlight(idx);
+    // Haptic-style micro rumble via CSS
+    const slot = document.getElementById('qwSlot' + idx);
+    if (slot) { slot.classList.add('qw-ping'); setTimeout(() => slot.classList.remove('qw-ping'), 150); }
+  }
+}
+
+// Key handling
+document.addEventListener('keydown', (e) => {
+  if (!document.getElementById('mainApp') || document.getElementById('mainApp').style.display === 'none') return;
+  const key = (settings.quickLaunchKey || 'q').toLowerCase();
+  if (e.key.toLowerCase() !== key) return;
+  if (e.repeat) return;
+  if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+  // Only on home tab
+  if (!document.body.classList.contains('on-home')) return;
+  if (wheelHeld) return;
+  wheelHeld = true;
+  wheelHoldTimer = setTimeout(() => { openQuickWheel(); }, WHEEL_HOLD_MS);
+});
+
+document.addEventListener('keyup', (e) => {
+  const key = (settings.quickLaunchKey || 'q').toLowerCase();
+  if (e.key.toLowerCase() !== key) return;
+  wheelHeld = false;
+  if (wheelHoldTimer) { clearTimeout(wheelHoldTimer); wheelHoldTimer = null; }
+  if (wheelOpen) closeQuickWheel(true);
+});
+
+document.addEventListener('mousemove', onWheelMouseMove);
+
+// Escape to close without launching
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && wheelOpen) { closeQuickWheel(false); wheelHeld = false; }
+});
+
+// Settings: update quickLaunchKey
+window.saveQuickLaunchKey = function() {
+  const inp = document.getElementById('qlKeyInp');
+  if (!inp) return;
+  const v = inp.value.trim().toLowerCase();
+  if (!v || v.length !== 1) { showToast('enter a single key'); return; }
+  settings.quickLaunchKey = v;
+  saveSettings();
+  inp.value = v;
+  const qlDisp = document.getElementById('qlKeyDisplay'); if(qlDisp) qlDisp.textContent = v.toUpperCase();
+  showToast(`quick launch key set to [${v.toUpperCase()}]`);
+};
+
+window.openQuickWheelPreview = function() {
+  if (!document.body.classList.contains('on-home')) { goTab('home'); setTimeout(openQuickWheel, 200); return; }
+  openQuickWheel();
+};
 
 window.openFavEditor = function() {
   const apps = getFavApps();
@@ -2722,6 +2836,34 @@ body.ui-glass .taskbar,body.u1-glass .taskbar,body.u2-glass .taskbar{background:
 .fav-add-btn{opacity:0.5}
 .fav-add-btn:hover{opacity:1}
 
+/* ── QUICK LAUNCH WHEEL ── */
+#quickWheelOverlay{transition:background 0.25s ease}
+#quickWheelOverlay.qw-visible{background:rgba(0,0,0,0.72)}
+.qw-bg{position:absolute;inset:0;backdrop-filter:blur(6px);opacity:0;transition:opacity 0.25s ease;pointer-events:none}
+#quickWheelOverlay.qw-visible .qw-bg{opacity:1}
+.qw-container{position:relative;width:400px;height:400px;flex-shrink:0}
+.qw-svg{position:absolute;inset:0;pointer-events:none}
+.qw-sector{fill:rgba(255,255,255,0.025);stroke:rgba(255,255,255,0.07);stroke-width:0.5;transition:fill 0.12s ease,stroke 0.12s ease;cursor:pointer}
+.qw-sector.qw-sec-active{fill:rgba(0,255,200,0.13);stroke:rgba(0,255,200,0.55);stroke-width:1}
+.qw-divider{stroke:rgba(255,255,255,0.1);stroke-width:0.5}
+.qw-slots-layer{position:absolute;inset:0;pointer-events:none}
+.qw-slot{position:absolute;top:50%;left:50%;display:flex;flex-direction:column;align-items:center;gap:4px;padding:8px 10px;background:rgba(10,14,24,0.85);border:1px solid rgba(255,255,255,0.1);border-radius:6px;min-width:62px;text-align:center;transition:background 0.18s,border-color 0.18s,box-shadow 0.18s,transform 0.22s cubic-bezier(0.34,1.56,0.64,1),opacity 0.22s ease;opacity:0;will-change:transform,opacity}
+#quickWheelOverlay.qw-visible .qw-slot{opacity:1}
+.qw-slot.qw-active{background:rgba(0,255,200,0.12)!important;border-color:rgba(0,255,200,0.6)!important;box-shadow:0 0 18px rgba(0,255,200,0.25),inset 0 0 8px rgba(0,255,200,0.06)!important}
+.qw-slot-icon{font-size:22px;line-height:1;filter:drop-shadow(0 0 4px rgba(0,255,200,0.0));transition:filter 0.15s}
+.qw-slot.qw-active .qw-slot-icon{filter:drop-shadow(0 0 6px rgba(0,255,200,0.5))}
+.qw-slot-name{font-family:'Space Mono',monospace;font-size:7px;color:rgba(255,255,255,0.5);white-space:nowrap;max-width:72px;overflow:hidden;text-overflow:ellipsis;letter-spacing:0.06em;transition:color 0.15s}
+.qw-slot.qw-active .qw-slot-name{color:rgba(0,255,200,0.9)}
+@keyframes qwPing{0%{box-shadow:0 0 0 0 rgba(0,255,200,0.5)}60%{box-shadow:0 0 0 8px rgba(0,255,200,0)}100%{box-shadow:0 0 0 0 rgba(0,255,200,0)}}
+.qw-slot.qw-ping{animation:qwPing 0.15s ease-out}
+.qw-center-ring{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:86px;height:86px;border-radius:50%;background:rgba(6,10,20,0.92);border:2px solid rgba(0,255,200,0.25);box-shadow:0 0 24px rgba(0,255,200,0.12),inset 0 0 12px rgba(0,0,0,0.6);display:flex;align-items:center;justify-content:center;pointer-events:none}
+.qw-center-inner{display:flex;flex-direction:column;align-items:center;gap:2px}
+.qw-center-key{font-family:'Orbitron',monospace;font-size:8px;font-weight:900;color:rgba(0,255,200,0.5);letter-spacing:0.2em}
+.qw-center-label{font-family:'Space Mono',monospace;font-size:7px;color:rgba(255,255,255,0.35);letter-spacing:0.08em;text-align:center;max-width:72px;transition:opacity 0.15s;line-height:1.3}
+.qw-hint-ring{position:absolute;bottom:-32px;left:50%;transform:translateX(-50%);font-family:'Space Mono',monospace;font-size:8px;color:rgba(255,255,255,0.2);letter-spacing:0.18em;text-transform:uppercase;white-space:nowrap;pointer-events:none}
+/* slot positioning via JS inline transform, but we patch transition-delay per open */
+#quickWheelOverlay:not(.qw-visible) .qw-slot{transition:all 0.14s ease!important;opacity:0!important;transform:translate(-50%,-50%) scale(0.5)!important}
+
 /* ── TASKBAR HIDE ON HOME ── */
 body.on-home .taskbar{display:none!important}
 </style>
@@ -2901,6 +3043,19 @@ body.on-home .taskbar{display:none!important}
       <!-- HIDDEN EGG -->
       <div class="ssec" style="display:none">
         <input class="sinp" id="eggInp" placeholder="" oninput="checkEgg(this.value)">
+      </div>
+
+      <!-- QUICK LAUNCH WHEEL -->
+      <div class="ssec">
+        <div class="slbl">quick launch wheel</div>
+        <div class="ssubl">hold key on home screen to open the GTA-style radial launcher · uses your first 6 fav apps</div>
+        <div class="srow" style="margin-top:8px;align-items:center;gap:8px">
+          <span style="font-family:Space Mono,monospace;font-size:9px;color:rgba(255,255,255,0.45)">hold key:</span>
+          <input class="sinp" id="qlKeyInp" placeholder="q" maxlength="1" style="margin:0;width:48px;text-align:center;font-size:14px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase" oninput="this.value=this.value.toLowerCase()">
+          <button class="sbtn" onclick="saveQuickLaunchKey()">save</button>
+          <button class="sbtn" onclick="openQuickWheelPreview()" style="border-color:rgba(0,255,200,0.35);color:rgba(0,255,200,0.8)">preview</button>
+        </div>
+        <div class="sinp-hint" style="margin-top:6px">hold [<span id="qlKeyDisplay">Q</span>] on home · aim mouse at app · release to launch</div>
       </div>
 
       <!-- DANGER -->
@@ -3314,7 +3469,23 @@ body.on-home .taskbar{display:none!important}
 
 </div>
 
-<!-- GIPHY PICKER -->
+<!-- QUICK LAUNCH WHEEL OVERLAY -->
+<div id="quickWheelOverlay" style="display:none;position:fixed;inset:0;z-index:99000;align-items:center;justify-content:center;background:rgba(0,0,0,0);pointer-events:all">
+  <div id="qwBg" class="qw-bg"></div>
+  <div id="qwContainer" class="qw-container">
+    <svg id="qwSectors" class="qw-svg" viewBox="0 0 400 400" width="400" height="400"></svg>
+    <div id="qwSlots" class="qw-slots-layer"></div>
+    <div class="qw-center-ring">
+      <div class="qw-center-inner">
+        <div class="qw-center-key" id="qwKeyHint">HOLD</div>
+        <div class="qw-center-label" id="qwCenterLabel">QUICK LAUNCH</div>
+      </div>
+    </div>
+    <div class="qw-hint-ring">AIM · RELEASE TO OPEN</div>
+  </div>
+</div>
+
+
 <div id="giphyPicker" style="display:none;position:fixed;bottom:80px;left:50%;transform:translateX(-50%);width:360px;max-height:380px;background:rgba(4,6,14,0.98);border:1px solid rgba(0,255,200,0.2);border-radius:6px;z-index:8000;flex-direction:column;box-shadow:0 8px 40px rgba(0,0,0,0.8),0 0 30px rgba(0,255,200,0.08)">
   <div style="display:flex;align-items:center;gap:8px;padding:10px 12px;border-bottom:1px solid rgba(255,255,255,0.06)">
     <input id="giphySearch" placeholder="search gifs..." style="flex:1;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.1);color:#e0f5ef;font-family:'Space Mono',monospace;font-size:10px;padding:6px 10px;border-radius:2px;outline:none" onkeydown="if(event.key==='Enter')searchGiphy()">
