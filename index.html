@@ -473,7 +473,12 @@ function initUI() {
   document.getElementById('tog-quotes').classList.toggle('on', settings.quotes);
   // populate saved config
   // Start on home tab
-  setTimeout(() => { goTab('home'); listenSessions(); restoreSessionState(); updateSessionUI(); }, 100);
+  setTimeout(() => {
+    const savedFit = localStorage.getItem('epoch_homefit');
+    homeFitMode = savedFit !== '0'; // default ON
+    goTab('home'); listenSessions(); restoreSessionState(); updateSessionUI();
+    applyHomeFit(homeFitMode);
+  }, 100);
   // telegram configured internally
   if (settings.driveUrl) document.getElementById('driveUrlInp').value = settings.driveUrl;
   // Quick launch key
@@ -921,6 +926,7 @@ window.goTab = function(tab) {
     renderHomeWidgets();
     startHomeClock();
     renderTodos();
+    applyHomeFit(homeFitMode);
   } else {
     document.body.classList.remove('on-home');
   }
@@ -1306,6 +1312,31 @@ window.openQuickWheelPreview = function() {
   if (!document.body.classList.contains('on-home')) { goTab('home'); setTimeout(openQuickWheel, 200); return; }
   openQuickWheel();
 };
+
+// ── HOME FIT / SCROLL TOGGLE ──
+let homeFitMode = true;
+function applyHomeFit(fit) {
+  homeFitMode = fit;
+  const hv = document.getElementById('homeView');
+  const hd = document.getElementById('homeDashboard');
+  const btn = document.getElementById('homeFitBtn');
+  if (!hv || !hd) return;
+  if (fit) {
+    hv.classList.add('home-noscroll');
+    hd.classList.add('home-fit');
+    hd.classList.remove('home-scroll');
+    hd.style.height = '100%';
+    if (btn) { btn.textContent = '⊟ SCROLL'; btn.style.color = 'var(--u1-acc)'; btn.style.borderColor = 'var(--u1-brd2)'; }
+  } else {
+    hv.classList.remove('home-noscroll');
+    hd.classList.remove('home-fit');
+    hd.classList.add('home-scroll');
+    hd.style.height = 'auto';
+    if (btn) { btn.textContent = '⊞ FIT'; btn.style.color = 'rgba(255,255,255,0.45)'; btn.style.borderColor = 'rgba(255,255,255,0.15)'; }
+  }
+  try { localStorage.setItem('epoch_homefit', fit ? '1' : '0'); } catch(e) {}
+}
+window.toggleHomeFit = function() { applyHomeFit(!homeFitMode); };
 
 window.openFavEditor = function() {
   const apps = getFavApps();
@@ -3053,6 +3084,39 @@ body.ui-glass .taskbar,body.u1-glass .taskbar,body.u2-glass .taskbar{background:
 .sess-cmp-bar{transition:filter 0.15s,outline 0.15s,height 0.2s}
 .sess-cmp-bar:hover{filter:brightness(1.35)}
 .sess-cmp-bar.sess-selected{filter:brightness(1.6)!important;outline:2px solid var(--u1-acc);outline-offset:1px}
+
+/* HOME FIT MODE — no page scroll, grid fills viewport */
+#homeView.home-noscroll { overflow: hidden !important; }
+#homeDashboard.home-fit {
+  overflow: hidden;
+  box-sizing: border-box;
+  padding-bottom: 6px;
+}
+/* SCROLL MODE — free scroll, auto-rows */
+#homeDashboard.home-scroll {
+  overflow: visible;
+  height: auto !important;
+  grid-template-rows: unset !important;
+  grid-template-areas: unset !important;
+  padding-bottom: 80px;
+}
+#homeDashboard.home-scroll > * { grid-area: unset !important; grid-column: span 4; }
+#homeDashboard.home-scroll .home-scroll-only { display: block !important; }
+#homeDashboard.home-fit .home-scroll-only { display: none !important; }
+
+/* Thin scrollbars for widgets */
+#todoList::-webkit-scrollbar,
+#homeRecentPosts::-webkit-scrollbar,
+#favAppsGrid::-webkit-scrollbar,
+#statsSessionChart::-webkit-scrollbar { width: 3px; height: 3px; }
+#todoList::-webkit-scrollbar-track,
+#homeRecentPosts::-webkit-scrollbar-track,
+#favAppsGrid::-webkit-scrollbar-track,
+#statsSessionChart::-webkit-scrollbar-track { background: transparent; }
+#todoList::-webkit-scrollbar-thumb,
+#homeRecentPosts::-webkit-scrollbar-thumb,
+#favAppsGrid::-webkit-scrollbar-thumb,
+#statsSessionChart::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.15); border-radius: 2px; }
 .qw-center-ring{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:86px;height:86px;border-radius:50%;background:rgba(6,10,20,0.92);border:2px solid rgba(0,255,200,0.25);box-shadow:0 0 24px rgba(0,255,200,0.12),inset 0 0 12px rgba(0,0,0,0.6);display:flex;align-items:center;justify-content:center;pointer-events:none}
 .qw-center-inner{display:flex;flex-direction:column;align-items:center;gap:2px}
 .qw-center-key{font-family:'Orbitron',monospace;font-size:8px;font-weight:900;color:rgba(0,255,200,0.5);letter-spacing:0.2em}
@@ -3310,11 +3374,20 @@ body.on-home .taskbar{display:none!important}
 
 
   <!-- HOME VIEW — IRON MAN DASHBOARD -->
-  <div id="homeView" style="display:none;flex:1;min-height:0;overflow-y:auto;background:transparent">
-    <div id="homeDashboard" style="padding:10px 12px 80px;display:grid;grid-template-columns:repeat(12,1fr);grid-auto-rows:min-content;gap:8px;max-width:1400px;width:100%;margin:0 auto">
+  <div id="homeView" style="display:none;flex:1;min-height:0;overflow:hidden;background:transparent">
+    <!-- fit/scroll toggle -->
+    <button id="homeFitBtn" onclick="toggleHomeFit()" title="toggle fit/scroll" style="position:absolute;bottom:90px;right:12px;z-index:200;background:rgba(0,0,0,0.7);border:1px solid rgba(255,255,255,0.15);color:rgba(255,255,255,0.45);font-family:Space Mono,monospace;font-size:8px;padding:4px 8px;cursor:pointer;border-radius:3px;letter-spacing:0.06em;backdrop-filter:blur(4px);transition:all 0.2s">⊞ FIT</button>
+    <div id="homeDashboard" class="home-fit" style="height:100%;padding:6px 10px 6px;display:grid;grid-template-columns:repeat(12,1fr);gap:6px;max-width:1800px;width:100%;margin:0 auto;
+      grid-template-rows: minmax(0,1.8fr) minmax(0,1.2fr) minmax(0,1.4fr) minmax(0,1.4fr);
+      grid-template-areas:
+        'clk clk clk clk rec rec rec rec cmp cmp cmp cmp'
+        'mst mst mst fst fst fst act act act act act act'
+        'bar bar bar bar bar bar bar ssc ssc ssc ssc ssc'
+        'rp  rp  rp  rp  rp  rp  td  td  td  td  td  td';
+    ">
 
-      <!-- FUTURISTIC CLOCK — spans 4 cols -->
-      <div style="grid-column:span 4;background:rgba(0,0,0,0.5);border:1px solid var(--u1-brd2);border-radius:4px;padding:12px;position:relative;overflow:hidden;display:flex;flex-direction:column;justify-content:center">
+      <!-- FUTURISTIC CLOCK -->
+      <div style="grid-area:clk;background:rgba(0,0,0,0.5);border:1px solid var(--u1-brd2);border-radius:4px;padding:10px 12px;position:relative;overflow:hidden;display:flex;flex-direction:column;justify-content:center;min-height:0">
         <div style="position:absolute;top:6px;right:8px;font-family:Space Mono,monospace;font-size:6px;color:rgba(255,255,255,0.2);letter-spacing:0.12em">SYSTEM TIME</div>
         <div style="position:absolute;top:0;left:0;right:0;height:1px;background:linear-gradient(90deg,transparent,var(--u1-acc),transparent);opacity:0.7"></div>
         <div style="position:absolute;bottom:0;left:0;right:0;height:1px;background:linear-gradient(90deg,transparent,var(--u1-acc),transparent);opacity:0.3"></div>
@@ -3327,8 +3400,8 @@ body.on-home .taskbar{display:none!important}
         </div>
       </div>
 
-      <!-- SESSION RECORDER — spans 4 cols -->
-      <div id="sessionWidget" style="grid-column:span 4;background:rgba(0,255,200,0.03);border:1px solid var(--u1-brd2);border-radius:4px;padding:10px;position:relative;overflow:hidden">
+      <!-- SESSION RECORDER -->
+      <div id="sessionWidget" style="grid-area:rec;background:rgba(0,255,200,0.03);border:1px solid var(--u1-brd2);border-radius:4px;padding:10px;position:relative;overflow:hidden;min-height:0">
         <div style="position:absolute;top:0;left:0;right:0;height:1px;background:linear-gradient(90deg,transparent,var(--u1-acc),transparent);opacity:0.5"></div>
         <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px">
           <div id="sessionDot" style="width:7px;height:7px;border-radius:50%;background:rgba(255,255,255,0.15);transition:all 0.3s;flex-shrink:0"></div>
@@ -3342,15 +3415,15 @@ body.on-home .taskbar{display:none!important}
         </div>
       </div>
 
-      <!-- SESSION COMPARISON WIDGET — spans 4 cols -->
-      <div style="grid-column:span 4;background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.08);border-radius:4px;padding:10px;position:relative;overflow:hidden">
+      <!-- SESSION COMPARISON WIDGET -->
+      <div style="grid-area:cmp;background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.08);border-radius:4px;padding:10px;position:relative;overflow:hidden;min-height:0">
         <div style="position:absolute;top:0;left:0;right:0;height:1px;background:linear-gradient(90deg,transparent,var(--u1-acc),transparent);opacity:0.3"></div>
         <div style="font-family:Orbitron,monospace;font-size:7px;font-weight:700;color:rgba(255,255,255,0.4);letter-spacing:0.15em;margin-bottom:6px">📈 FOCUS DELTA</div>
         <div id="sessionCompWidget" style="font-family:Space Mono,monospace;font-size:9px;color:rgba(255,255,255,0.3)">start a session to<br>track focus time</div>
       </div>
 
-      <!-- MY STATS — spans 3 cols -->
-      <div style="grid-column:span 3;background:var(--u1-bg2);border:1px solid var(--u1-brd);border-radius:4px;padding:10px;position:relative;overflow:hidden">
+      <!-- MY STATS -->
+      <div style="grid-area:mst;background:var(--u1-bg2);border:1px solid var(--u1-brd);border-radius:4px;padding:10px;position:relative;overflow:hidden;min-height:0">
         <div style="position:absolute;top:0;left:0;right:0;height:1px;background:linear-gradient(90deg,transparent,var(--u1-acc),transparent)"></div>
         <div style="font-family:Orbitron,monospace;font-size:7px;font-weight:700;color:var(--u1-acc);letter-spacing:0.15em;margin-bottom:8px">⚡ MY STATS</div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">
@@ -3361,8 +3434,8 @@ body.on-home .taskbar{display:none!important}
         </div>
       </div>
 
-      <!-- FRIEND STATS — spans 3 cols -->
-      <div style="grid-column:span 3;background:var(--u2-bg2);border:1px solid var(--u2-brd);border-radius:4px;padding:10px;position:relative;overflow:hidden">
+      <!-- FRIEND STATS -->
+      <div style="grid-area:fst;background:var(--u2-bg2);border:1px solid var(--u2-brd);border-radius:4px;padding:10px;position:relative;overflow:hidden;min-height:0">
         <div style="position:absolute;top:0;left:0;right:0;height:1px;background:linear-gradient(90deg,transparent,var(--u2-acc),transparent)"></div>
         <div style="font-family:Orbitron,monospace;font-size:7px;font-weight:700;color:var(--u2-acc);letter-spacing:0.15em;margin-bottom:8px">⚡ FRIEND STATS</div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">
@@ -3373,76 +3446,70 @@ body.on-home .taskbar{display:none!important}
         </div>
       </div>
 
-      <!-- POST ACTIVITY CHART — spans 6 cols -->
-      <div style="grid-column:span 6;background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.07);border-radius:4px;padding:10px;position:relative;overflow:hidden">
+      <!-- POST ACTIVITY CHART -->
+      <div style="grid-area:bar;background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.07);border-radius:4px;padding:10px;position:relative;overflow:hidden;min-height:0">
         <div style="position:absolute;top:0;left:0;right:0;height:1px;background:linear-gradient(90deg,transparent,var(--u1-acc),transparent);opacity:0.4"></div>
         <div style="font-family:Orbitron,monospace;font-size:7px;font-weight:700;color:rgba(255,255,255,0.4);letter-spacing:0.15em;margin-bottom:6px">📊 14-DAY ACTIVITY</div>
         <div id="homeBarChart"></div>
       </div>
 
-      <!-- MY 30-DAY HEATMAP — spans 4 cols -->
-      <div style="grid-column:span 4;background:rgba(0,255,200,0.02);border:1px solid var(--u1-brd);border-radius:4px;padding:10px;position:relative;overflow:hidden">
+      <!-- MY 30-DAY HEATMAP — hidden in fit mode, kept for scroll mode -->
+      <div class="home-scroll-only" style="grid-column:span 4;background:rgba(0,255,200,0.02);border:1px solid var(--u1-brd);border-radius:4px;padding:10px;position:relative;overflow:hidden">
         <div style="position:absolute;top:0;left:0;right:0;height:1px;background:linear-gradient(90deg,transparent,var(--u1-acc),transparent);opacity:0.4"></div>
         <div style="font-family:Orbitron,monospace;font-size:7px;font-weight:700;color:var(--u1-acc);letter-spacing:0.15em;margin-bottom:6px">🗓 MY 30D GRID</div>
         <div id="homeMiniHmap"></div>
       </div>
 
-      <!-- FRIEND 30-DAY HEATMAP — spans 4 cols -->
-      <div style="grid-column:span 4;background:var(--u2-bg);border:1px solid var(--u2-brd);border-radius:4px;padding:10px;position:relative;overflow:hidden">
+      <!-- FRIEND 30-DAY HEATMAP — hidden in fit mode -->
+      <div class="home-scroll-only" style="grid-column:span 4;background:var(--u2-bg);border:1px solid var(--u2-brd);border-radius:4px;padding:10px;position:relative;overflow:hidden">
         <div style="position:absolute;top:0;left:0;right:0;height:1px;background:linear-gradient(90deg,transparent,var(--u2-acc),transparent);opacity:0.4"></div>
         <div style="font-family:Orbitron,monospace;font-size:7px;font-weight:700;color:var(--u2-acc);letter-spacing:0.15em;margin-bottom:6px">🗓 FRIEND 30D GRID</div>
         <div id="homeMiniHmapFr"></div>
       </div>
 
-      <!-- SESSION CHART — spans 4 cols -->
-      <div style="grid-column:span 4;background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.07);border-radius:4px;padding:10px;position:relative;overflow:hidden">
+      <!-- SESSION CHART -->
+      <div style="grid-area:ssc;background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.07);border-radius:4px;padding:10px;position:relative;overflow:hidden;min-height:0;display:flex;flex-direction:column">
         <div style="position:absolute;top:0;left:0;right:0;height:1px;background:linear-gradient(90deg,transparent,rgba(255,255,255,0.3),transparent)"></div>
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;flex-shrink:0">
           <div style="font-family:Orbitron,monospace;font-size:7px;font-weight:700;color:rgba(255,255,255,0.4);letter-spacing:0.15em">⏱ SESSION COMPARE</div>
           <button onclick="goTab('stats')" style="background:none;border:1px solid rgba(255,255,255,0.1);color:rgba(255,255,255,0.3);font-family:Space Mono,monospace;font-size:6px;padding:2px 6px;cursor:pointer;border-radius:2px">more →</button>
         </div>
-        <div id="statsSessionChart" style="min-height:60px"></div>
+        <div id="statsSessionChart" style="flex:1;min-height:0;overflow:hidden"></div>
       </div>
 
-      <!-- FAVORITE APPS — spans 8 cols -->
-      <div style="grid-column:span 8;background:rgba(255,255,255,0.015);border:1px solid rgba(255,255,255,0.07);border-radius:4px;padding:10px;position:relative;overflow:hidden">
-        <div style="position:absolute;top:0;left:0;right:0;height:1px;background:linear-gradient(90deg,transparent,rgba(255,255,255,0.15),transparent)"></div>
-        <div style="font-family:Orbitron,monospace;font-size:7px;font-weight:700;color:rgba(255,255,255,0.35);letter-spacing:0.15em;margin-bottom:8px">★ SHORTCUTS</div>
-        <div id="favAppsGrid" style="display:flex;flex-wrap:wrap;gap:6px"></div>
-      </div>
-
-      <!-- QUICK ACTIONS — spans 4 cols -->
-      <div style="grid-column:span 4;background:rgba(255,255,255,0.015);border:1px solid rgba(255,255,255,0.07);border-radius:4px;padding:10px">
-        <div style="font-family:Orbitron,monospace;font-size:7px;font-weight:700;color:rgba(255,255,255,0.4);letter-spacing:0.15em;margin-bottom:8px">⚡ ACTIONS</div>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:5px">
-          <button onclick="goTab('feed');setTimeout(()=>document.getElementById('pinp1').focus(),100)" style="background:var(--u1-acc2);border:1px solid var(--u1-brd2);color:var(--u1-acc);font-family:Orbitron,monospace;font-size:7px;font-weight:700;padding:8px 6px;cursor:pointer;border-radius:2px;letter-spacing:0.06em">✍ LOG</button>
-          <button onclick="startSession()" style="background:rgba(0,255,200,0.06);border:1px solid rgba(0,255,200,0.25);color:#00ffc8;font-family:Orbitron,monospace;font-size:7px;font-weight:700;padding:8px 6px;cursor:pointer;border-radius:2px;letter-spacing:0.06em">🎬 REC</button>
-          <button onclick="showWeeklyReport()" style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.1);color:rgba(255,255,255,0.5);font-family:Orbitron,monospace;font-size:7px;font-weight:700;padding:8px 6px;cursor:pointer;border-radius:2px;letter-spacing:0.06em">📊 WRAP</button>
-          <button onclick="goTab('stats')" style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.1);color:rgba(255,255,255,0.5);font-family:Orbitron,monospace;font-size:7px;font-weight:700;padding:8px 6px;cursor:pointer;border-radius:2px;letter-spacing:0.06em">📈 STATS</button>
+      <!-- QUICK ACTIONS -->
+      <div style="grid-area:act;background:rgba(255,255,255,0.015);border:1px solid rgba(255,255,255,0.07);border-radius:4px;padding:10px;min-height:0">
+        <div style="font-family:Orbitron,monospace;font-size:7px;font-weight:700;color:rgba(255,255,255,0.4);letter-spacing:0.15em;margin-bottom:8px">⚡ ACTIONS + SHORTCUTS</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:5px;margin-bottom:8px">
+          <button onclick="goTab('feed');setTimeout(()=>document.getElementById('pinp1').focus(),100)" style="background:var(--u1-acc2);border:1px solid var(--u1-brd2);color:var(--u1-acc);font-family:Orbitron,monospace;font-size:7px;font-weight:700;padding:6px 4px;cursor:pointer;border-radius:2px;letter-spacing:0.06em">✍ LOG</button>
+          <button onclick="startSession()" style="background:rgba(0,255,200,0.06);border:1px solid rgba(0,255,200,0.25);color:#00ffc8;font-family:Orbitron,monospace;font-size:7px;font-weight:700;padding:6px 4px;cursor:pointer;border-radius:2px;letter-spacing:0.06em">🎬 REC</button>
+          <button onclick="showWeeklyReport()" style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.1);color:rgba(255,255,255,0.5);font-family:Orbitron,monospace;font-size:7px;font-weight:700;padding:6px 4px;cursor:pointer;border-radius:2px;letter-spacing:0.06em">📊 WRAP</button>
+          <button onclick="goTab('stats')" style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.1);color:rgba(255,255,255,0.5);font-family:Orbitron,monospace;font-size:7px;font-weight:700;padding:6px 4px;cursor:pointer;border-radius:2px;letter-spacing:0.06em">📈 STATS</button>
         </div>
+        <div id="favAppsGrid" style="display:flex;flex-wrap:wrap;gap:4px;overflow-y:auto;max-height:80px"></div>
       </div>
 
-      <!-- RECENT POSTS — spans 6 cols -->
-      <div style="grid-column:span 6;background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.07);border-radius:4px;padding:10px;position:relative;overflow:hidden">
+      <!-- RECENT POSTS -->
+      <div style="grid-area:rp;background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.07);border-radius:4px;padding:10px;position:relative;overflow:hidden;min-height:0;display:flex;flex-direction:column">
         <div style="position:absolute;top:0;left:0;right:0;height:1px;background:linear-gradient(90deg,transparent,var(--u1-acc),transparent);opacity:0.3"></div>
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;flex-shrink:0">
           <div style="font-family:Orbitron,monospace;font-size:7px;font-weight:700;color:rgba(255,255,255,0.4);letter-spacing:0.15em">📋 RECENT POSTS</div>
           <button onclick="goTab('feed')" style="background:none;border:1px solid rgba(255,255,255,0.1);color:rgba(255,255,255,0.3);font-family:Space Mono,monospace;font-size:6px;padding:2px 6px;cursor:pointer;border-radius:2px">feed →</button>
         </div>
-        <div id="homeRecentPosts"></div>
+        <div id="homeRecentPosts" style="flex:1;overflow-y:auto;min-height:0"></div>
       </div>
 
-      <!-- TO-DO LIST — spans 6 cols -->
-      <div style="grid-column:span 6;background:rgba(255,255,255,0.01);border:1px solid rgba(255,255,255,0.07);border-radius:4px;padding:12px;position:relative;overflow:hidden">
+      <!-- TO-DO LIST -->
+      <div style="grid-area:td;background:rgba(255,255,255,0.01);border:1px solid rgba(255,255,255,0.07);border-radius:4px;padding:10px;position:relative;overflow:hidden;min-height:0;display:flex;flex-direction:column">
         <div style="position:absolute;left:0;top:0;bottom:0;width:2px;background:var(--u1-acc);opacity:0.4"></div>
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;flex-shrink:0">
           <div style="font-family:Orbitron,monospace;font-size:7px;font-weight:700;color:rgba(255,255,255,0.4);letter-spacing:0.15em">✅ TO-DO</div>
         </div>
-        <div style="display:flex;gap:6px;margin-bottom:8px">
-          <input id="todoInp" placeholder="add a task..." onkeydown="if(event.key==='Enter')addTodo()" style="flex:1;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.1);color:#e0f5ef;font-family:Space Mono,monospace;font-size:10px;padding:6px 10px;border-radius:2px;outline:none">
-          <button onclick="addTodo()" style="background:var(--u1-acc);color:#000;font-family:Orbitron,monospace;font-size:7px;font-weight:700;padding:6px 10px;border:none;cursor:pointer;border-radius:2px;letter-spacing:0.06em">ADD</button>
+        <div style="display:flex;gap:6px;margin-bottom:6px;flex-shrink:0">
+          <input id="todoInp" placeholder="add a task..." onkeydown="if(event.key==='Enter')addTodo()" style="flex:1;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.1);color:#e0f5ef;font-family:Space Mono,monospace;font-size:10px;padding:5px 8px;border-radius:2px;outline:none">
+          <button onclick="addTodo()" style="background:var(--u1-acc);color:#000;font-family:Orbitron,monospace;font-size:7px;font-weight:700;padding:5px 8px;border:none;cursor:pointer;border-radius:2px;letter-spacing:0.06em">ADD</button>
         </div>
-        <div id="todoList" style="max-height:120px;overflow-y:auto"></div>
+        <div id="todoList" style="flex:1;overflow-y:auto;min-height:0"></div>
       </div>
 
     </div>
