@@ -251,22 +251,29 @@ function updateSessionStatsUI() {
       }).join('') + '</div>';
     const tip = document.getElementById(tipId);
     el.querySelectorAll('.sess-bar').forEach(bar => {
-      bar.addEventListener('mouseenter', () => {
+      const delBtn = bar.querySelector('.sess-del-btn');
+      let hideTimer = null;
+      function showBar() {
+        clearTimeout(hideTimer);
         tip.textContent = `${bar.dataset.date}: ${bar.dataset.dur}`;
         tip.style.display='block';
         tip.style.left=(bar.offsetLeft+bar.offsetWidth/2)+'px';
-        const delBtn = bar.querySelector('.sess-del-btn');
         if (delBtn) delBtn.style.display='block';
-      });
-      bar.addEventListener('mouseleave', () => {
-        tip.style.display='none';
-        const delBtn = bar.querySelector('.sess-del-btn');
-        if (delBtn) delBtn.style.display='none';
-      });
-      const delBtn = bar.querySelector('.sess-del-btn');
+      }
+      function scheduleHide() {
+        hideTimer = setTimeout(() => {
+          tip.style.display='none';
+          if (delBtn) delBtn.style.display='none';
+        }, 150);
+      }
+      bar.addEventListener('mouseenter', showBar);
+      bar.addEventListener('mouseleave', scheduleHide);
       if (delBtn) {
+        delBtn.addEventListener('mouseenter', () => clearTimeout(hideTimer));
+        delBtn.addEventListener('mouseleave', scheduleHide);
         delBtn.addEventListener('click', (e) => {
           e.stopPropagation();
+          clearTimeout(hideTimer);
           const fbKey = delBtn.dataset.fbkey;
           if (fbKey) removeSession(fbKey);
         });
