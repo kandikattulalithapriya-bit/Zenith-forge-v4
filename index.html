@@ -208,44 +208,203 @@ function updateSessionUI() {
 
 // Session stats rendering
 let allSessions = {Monish:[], Prashanth:[]};
+let allSessionKeys = {Monish:{}, Prashanth:{}}; // firebaseKey -> session obj
 function listenSessions() {
   import("https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js").then(({ref, onValue}) => {
     try {
       onValue(ref(db, 'sessions'), snap => {
         const d = snap.val() || {};
-        allSessions = {Monish: Object.values(d.Monish||{}), Prashanth: Object.values(d.Prashanth||{})};
+        // Store both values and key->obj maps for deletion
+        allSessionKeys = {
+          Monish: d.Monish || {},
+          Prashanth: d.Prashanth || {}
+        };
+        allSessions = {
+          Monish: Object.entries(d.Monish||{}).map(([k,v])=>({...v,_key:k})),
+          Prashanth: Object.entries(d.Prashanth||{}).map(([k,v])=>({...v,_key:k}))
+        };
         updateSessionStatsUI();
       });
     } catch(e) {}
   }).catch(()=>{});
 }
+
+window.deleteSession = function(user, key) {
+  import("https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js").then(({ref, remove}) => {
+    try {
+      remove(ref(db, `sessions/${user}/${key}`));
+      showToast('session deleted ✓');
+    } catch(e) {}
+  }).catch(()=>{});
+};
+let selectedSessionKey = null; // { user, key }
+
 function updateSessionStatsUI() {
   ['statsSessionChart', 'statsSessionChart2'].forEach(id => {
     const el = document.getElementById(id);
     if (!el) return;
-    const mine = allSessions[ME] || [];
-    const last7 = mine.slice(-7);
-    if (!last7.length) { el.innerHTML = '<div style="text-align:center;padding:20px;font-family:Space Mono,monospace;font-size:9px;color:rgba(255,255,255,0.3)">no sessions yet — use 🎬 on home to record</div>'; return; }
-    const maxDur = Math.max(...last7.map(s => s.duration || 0)) || 1;
-    const tipId = id+'_tip';
-    el.style.position='relative';
-    el.innerHTML = `<div id="${tipId}" style="display:none;position:absolute;top:-28px;background:rgba(4,8,18,0.97);border:1px solid rgba(0,255,200,0.25);padding:3px 9px;font-family:Space Mono,monospace;font-size:8px;color:#e0f5ef;border-radius:3px;white-space:nowrap;z-index:100;pointer-events:none"></div>` +
-      '<div style="display:flex;align-items:flex-end;gap:6px;height:80px;padding:0 4px">' +
-      last7.map((s,i) => {
-        const h = Math.round((s.duration / maxDur) * 70) + 10;
-        return `<div class="sess-bar" data-dur="${fmtTime(s.duration||0)}" data-date="${s.date||''}" style="flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;cursor:default"><div style="width:100%;height:${h}px;background:var(--u1-accl);border:1px solid var(--u1-brd2);border-radius:2px;transition:all 0.3s"></div><div style="font-family:Space Mono,monospace;font-size:7px;color:rgba(255,255,255,0.4)">${s.date||''}</div></div>`;
-      }).join('') + '</div>';
-    const tip = document.getElementById(tipId);
-    el.querySelectorAll('.sess-bar').forEach(bar => {
-      bar.addEventListener('mouseenter', () => {
-        tip.textContent = `${bar.dataset.date}: ${bar.dataset.dur}`;
-        tip.style.display='block';
-        tip.style.left=(bar.offsetLeft+bar.offsetWidth/2)+'px';
-      });
-      bar.addEventListener('mouseleave', () => { tip.style.display='none'; });
-    });
+    buildSessionCompareChart(el, id);
   });
 }
+
+function buildSessionCompareChart(el, chartId) {
+  const mine = (allSessions[ME] || []).slice().sort((a,b) => (a.ts||0)-(b.ts||0));
+  const theirs = (allSessions[FRIEND()] || []).slice().sort((a,b) => (a.ts||0)-(b.ts||0));
+  // Collect all unique dates from both
+  const dateSet = new Set([...mine.map(s=>s.date||''), ...theirs.map(s=>s.date||'')].filter(Boolean));
+  // Build last 10 dates (most recent)
+  const allDates = [...dateSet].sort((a,b) => {
+    const pa = mine.find(s=>s.date===a)||theirs.find(s=>s.date===a);
+    const pb = mine.find(s=>s.date===b)||theirs.find(s=>s.date===b);
+    return (pa?.ts||0)-(pb?.ts||0);
+  }).slice(-10);
+
+  if (!mine.length && !theirs.length) {
+    el.innerHTML = '<div style="text-align:center;padding:20px;font-family:Space Mono,monospace;font-size:9px;color:rgba(255,255,255,0.3)">no sessions yet — use 🎬 on home to record</div>';
+    return;
+  }
+
+  // Group durations by date per user
+  const myByDate = {}, frByDate = {};
+  mine.forEach(s => { if(s.date) myByDate[s.date] = (myByDate[s.date]||0) + (s.duration||0); });
+  theirs.forEach(s => { if(s.date) frByDate[s.date] = (frByDate[s.date]||0) + (s.duration||0); });
+
+  const maxDur = Math.max(1, ...Object.values(myByDate), ...Object.values(frByDate));
+  const tipId = chartId + '_tip';
+
+  el.style.position = 'relative';
+  el.innerHTML = `
+    <div style="display:flex;gap:8px;margin-bottom:6px;align-items:center">
+      <span style="font-family:Space Mono,monospace;font-size:7px;color:var(--u1-acc)">■ ${ME}</span>
+      <span style="font-family:Space Mono,monospace;font-size:7px;color:var(--u2-acc)">■ ${FRIEND()}</span>
+      <span id="${chartId}_delhint" style="margin-left:auto;font-family:Space Mono,monospace;font-size:6px;color:rgba(255,255,255,0.25);display:none">click bar to select · 🗑 to delete</span>
+    </div>
+    <div id="${tipId}" style="display:none;position:absolute;top:-30px;left:50%;transform:translateX(-50%);background:rgba(4,8,18,0.97);border:1px solid rgba(0,255,200,0.25);padding:3px 10px;font-family:Space Mono,monospace;font-size:8px;color:#e0f5ef;border-radius:3px;white-space:nowrap;z-index:100;pointer-events:none"></div>
+    <div style="display:flex;align-items:flex-end;gap:4px;height:90px;padding:0 2px" id="${chartId}_bars"></div>
+    <div id="${chartId}_delbar" style="display:none;margin-top:8px;padding:6px 8px;background:rgba(255,60,60,0.08);border:1px solid rgba(255,60,60,0.25);border-radius:3px;display:none;align-items:center;justify-content:space-between;gap:8px">
+      <span id="${chartId}_dellabel" style="font-family:Space Mono,monospace;font-size:8px;color:rgba(255,255,255,0.6)"></span>
+      <button onclick="confirmDeleteSession('${chartId}')" style="background:rgba(255,60,60,0.2);border:1px solid rgba(255,60,60,0.4);color:#ff6060;font-family:Orbitron,monospace;font-size:7px;font-weight:700;padding:4px 10px;cursor:pointer;border-radius:2px;letter-spacing:0.06em">🗑 DELETE</button>
+      <button onclick="deselectSession('${chartId}')" style="background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.1);color:rgba(255,255,255,0.35);font-family:Space Mono,monospace;font-size:7px;padding:4px 8px;cursor:pointer;border-radius:2px">✕</button>
+    </div>
+  `;
+
+  const barsEl = document.getElementById(chartId + '_bars');
+  const tip = document.getElementById(tipId);
+
+  allDates.forEach(date => {
+    const myDur = myByDate[date] || 0;
+    const frDur = frByDate[date] || 0;
+    const h1 = myDur ? Math.round((myDur/maxDur)*76)+6 : 4;
+    const h2 = frDur ? Math.round((frDur/maxDur)*76)+6 : 4;
+
+    // Find individual sessions for this date (for deletion)
+    const mySess = mine.filter(s => s.date === date);
+    const frSess = theirs.filter(s => s.date === date);
+
+    const col = document.createElement('div');
+    col.style.cssText = 'flex:1;display:flex;flex-direction:column;align-items:center;gap:1px;min-width:0';
+
+    const barsRow = document.createElement('div');
+    barsRow.style.cssText = 'width:100%;display:flex;gap:2px;align-items:flex-end;height:82px';
+
+    // My bar
+    const b1 = document.createElement('div');
+    b1.className = 'sess-cmp-bar';
+    b1.dataset.user = ME;
+    b1.dataset.date = date;
+    b1.dataset.dur = fmtTime(myDur);
+    b1.dataset.keys = JSON.stringify(mySess.map(s=>s._key));
+    b1.style.cssText = `flex:1;height:${h1}px;background:${myDur?'var(--u1-accl)':'rgba(255,255,255,0.04)'};border:1px solid ${myDur?'var(--u1-brd2)':'rgba(255,255,255,0.06)'};border-radius:2px 2px 0 0;cursor:${mySess.length&&ME===ME?'pointer':'default'};transition:all 0.2s`;
+    if (mySess.length) b1.style.cursor = 'pointer';
+
+    // Friend bar
+    const b2 = document.createElement('div');
+    b2.className = 'sess-cmp-bar';
+    b2.dataset.user = FRIEND();
+    b2.dataset.date = date;
+    b2.dataset.dur = fmtTime(frDur);
+    b2.dataset.keys = JSON.stringify(frSess.map(s=>s._key));
+    b2.style.cssText = `flex:1;height:${h2}px;background:${frDur?'var(--u2-accl)':'rgba(255,255,255,0.04)'};border:1px solid ${frDur?'var(--u2-brd2)':'rgba(255,255,255,0.06)'};border-radius:2px 2px 0 0;cursor:default;transition:all 0.2s`;
+    // Only my sessions are deletable
+    if (mySess.length > 0) {
+      b1.addEventListener('click', () => selectSessionBar(chartId, b1, date, ME, mySess));
+    }
+
+    [b1,b2].forEach(bar => {
+      bar.addEventListener('mouseenter', () => {
+        const u = bar.dataset.user; const dur = bar.dataset.dur; const d = bar.dataset.date;
+        tip.textContent = `${u} · ${d}: ${dur}`;
+        tip.style.display = 'block';
+      });
+      bar.addEventListener('mouseleave', () => { tip.style.display = 'none'; });
+    });
+
+    barsRow.appendChild(b1);
+    barsRow.appendChild(b2);
+
+    const lbl = document.createElement('div');
+    lbl.style.cssText = 'font-family:Space Mono,monospace;font-size:6px;color:rgba(255,255,255,0.3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;width:100%;text-align:center;margin-top:2px';
+    lbl.textContent = date || '';
+
+    col.appendChild(barsRow);
+    col.appendChild(lbl);
+    barsEl.appendChild(col);
+  });
+}
+
+function selectSessionBar(chartId, barEl, date, user, sessions) {
+  const delbar = document.getElementById(chartId + '_delbar');
+  const dellabel = document.getElementById(chartId + '_dellabel');
+  const delhint = document.getElementById(chartId + '_delhint');
+  if (!delbar) return;
+
+  // Deselect if same
+  if (barEl.classList.contains('sess-selected')) {
+    deselectSession(chartId);
+    return;
+  }
+
+  // Clear previous selection
+  document.querySelectorAll('.sess-cmp-bar.sess-selected').forEach(b => b.classList.remove('sess-selected'));
+  barEl.classList.add('sess-selected');
+  barEl.style.filter = 'brightness(1.6)';
+  barEl.style.outline = '2px solid var(--u1-acc)';
+
+  const totalDur = sessions.reduce((a,s)=>a+(s.duration||0),0);
+  dellabel.textContent = `${date} · ${sessions.length} session${sessions.length!==1?'s':''} · ${fmtTime(totalDur)}`;
+  delbar.style.display = 'flex';
+  if (delhint) delhint.style.display = 'inline';
+
+  // Store pending delete info on el
+  delbar.dataset.pendingUser = user;
+  delbar.dataset.pendingKeys = JSON.stringify(sessions.map(s=>s._key));
+  delbar._barEl = barEl;
+}
+
+window.deselectSession = function(chartId) {
+  const delbar = document.getElementById(chartId + '_delbar');
+  if (delbar) { delbar.style.display = 'none'; delete delbar._barEl; }
+  document.querySelectorAll('.sess-cmp-bar.sess-selected').forEach(b => {
+    b.classList.remove('sess-selected');
+    b.style.filter = '';
+    b.style.outline = '';
+  });
+};
+
+window.confirmDeleteSession = function(chartId) {
+  const delbar = document.getElementById(chartId + '_delbar');
+  if (!delbar) return;
+  const user = delbar.dataset.pendingUser;
+  const keys = JSON.parse(delbar.dataset.pendingKeys || '[]');
+  if (!user || !keys.length) return;
+  import("https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js").then(({ref, remove}) => {
+    keys.forEach(k => {
+      try { remove(ref(db, `sessions/${user}/${k}`)); } catch(e){}
+    });
+    showToast(`🗑 deleted ${keys.length} session${keys.length!==1?'s':''}`);
+    deselectSession(chartId);
+  }).catch(()=>{});
+};
 
 let imgData = null;
 let allPosts = { Monish: {}, Prashanth: {} };
@@ -2891,6 +3050,9 @@ body.ui-glass .taskbar,body.u1-glass .taskbar,body.u2-glass .taskbar{background:
 .qw-slot.qw-active .qw-slot-name{color:rgba(0,255,200,0.9)}
 @keyframes qwPing{0%{box-shadow:0 0 0 0 rgba(0,255,200,0.5)}60%{box-shadow:0 0 0 8px rgba(0,255,200,0)}100%{box-shadow:0 0 0 0 rgba(0,255,200,0)}}
 .qw-slot.qw-ping{animation:qwPing 0.15s ease-out}
+.sess-cmp-bar{transition:filter 0.15s,outline 0.15s,height 0.2s}
+.sess-cmp-bar:hover{filter:brightness(1.35)}
+.sess-cmp-bar.sess-selected{filter:brightness(1.6)!important;outline:2px solid var(--u1-acc);outline-offset:1px}
 .qw-center-ring{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:86px;height:86px;border-radius:50%;background:rgba(6,10,20,0.92);border:2px solid rgba(0,255,200,0.25);box-shadow:0 0 24px rgba(0,255,200,0.12),inset 0 0 12px rgba(0,0,0,0.6);display:flex;align-items:center;justify-content:center;pointer-events:none}
 .qw-center-inner{display:flex;flex-direction:column;align-items:center;gap:2px}
 .qw-center-key{font-family:'Orbitron',monospace;font-size:8px;font-weight:900;color:rgba(0,255,200,0.5);letter-spacing:0.2em}
@@ -3236,7 +3398,7 @@ body.on-home .taskbar{display:none!important}
       <div style="grid-column:span 4;background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.07);border-radius:4px;padding:10px;position:relative;overflow:hidden">
         <div style="position:absolute;top:0;left:0;right:0;height:1px;background:linear-gradient(90deg,transparent,rgba(255,255,255,0.3),transparent)"></div>
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
-          <div style="font-family:Orbitron,monospace;font-size:7px;font-weight:700;color:rgba(255,255,255,0.4);letter-spacing:0.15em">⏱ SESSION HISTORY</div>
+          <div style="font-family:Orbitron,monospace;font-size:7px;font-weight:700;color:rgba(255,255,255,0.4);letter-spacing:0.15em">⏱ SESSION COMPARE</div>
           <button onclick="goTab('stats')" style="background:none;border:1px solid rgba(255,255,255,0.1);color:rgba(255,255,255,0.3);font-family:Space Mono,monospace;font-size:6px;padding:2px 6px;cursor:pointer;border-radius:2px">more →</button>
         </div>
         <div id="statsSessionChart" style="min-height:60px"></div>
@@ -3352,9 +3514,9 @@ body.on-home .taskbar{display:none!important}
 
       <!-- Session chart -->
       <div style="background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.08);border-radius:4px;padding:16px">
-        <div style="font-family:Orbitron,monospace;font-size:10px;font-weight:700;color:rgba(255,255,255,0.6);letter-spacing:0.12em;margin-bottom:12px">⏱ SESSION RECORDINGS</div>
+        <div style="font-family:Orbitron,monospace;font-size:10px;font-weight:700;color:rgba(255,255,255,0.6);letter-spacing:0.12em;margin-bottom:12px">⏱ SESSION COMPARISON — ME vs FRIEND</div>
         <div id="statsSessionChart2"></div>
-        <div style="font-family:Space Mono,monospace;font-size:8px;color:rgba(255,255,255,0.3);margin-top:8px">sessions tracked via 🎬 session recorder on home page</div>
+        <div style="font-family:Space Mono,monospace;font-size:8px;color:rgba(255,255,255,0.3);margin-top:8px">click your bars to select · delete removes that day's sessions</div>
       </div>
     </div>
   </div>
