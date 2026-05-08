@@ -85,7 +85,7 @@ const UI_STYLES = [
 // Color wheels — free pick via HSL
 let wheelState = { u1: '#00ffc8', u2: '#ff00cc' };
 
-const APP_VERSION = 'v27';
+const APP_VERSION = 'v26';
 // ── SESSION RECORDING STATE ──
 let sessionActive = false;
 let sessionPaused = false;
@@ -95,39 +95,6 @@ let sessionPausedMs = 0;
 let sessionTimer = null;
 let sessionLog = []; // [{action, ts}]
 let pendingPostAfterSession = false;
-
-// ── SESSION PERSISTENCE (survives tab close / refresh) ──
-function saveSessionState() {
-  try {
-    localStorage.setItem('epoch_session', JSON.stringify({
-      sessionActive, sessionPaused,
-      sessionStart, sessionPauseStart,
-      sessionPausedMs, sessionLog
-    }));
-  } catch(e) {}
-}
-function clearSessionState() {
-  try { localStorage.removeItem('epoch_session'); } catch(e) {}
-}
-function restoreSessionState() {
-  try {
-    const raw = localStorage.getItem('epoch_session');
-    if (!raw) return;
-    const s = JSON.parse(raw);
-    if (!s.sessionActive) { clearSessionState(); return; }
-    sessionActive     = s.sessionActive   ?? false;
-    sessionPaused     = s.sessionPaused   ?? false;
-    sessionStart      = s.sessionStart    ?? null;
-    sessionPauseStart = s.sessionPauseStart ?? null;
-    sessionPausedMs   = s.sessionPausedMs ?? 0;
-    sessionLog        = s.sessionLog      ?? [];
-    // Wall-clock elapsed handles time that passed while tab was closed automatically
-    sessionTimer = setInterval(updateSessionUI, 1000);
-    const sw = document.getElementById('sessionWidget');
-    if (sw) sw.classList.add('active');
-    showToast('🎬 session restored — still running');
-  } catch(e) { clearSessionState(); }
-}
 
 function getSessionElapsed() {
   if (!sessionStart) return 0;
@@ -148,7 +115,6 @@ window.startSession = function() {
   sessionActive = true; sessionPaused = false;
   sessionStart = Date.now(); sessionPausedMs = 0; sessionLog = [];
   sessionLog.push({action:'started', ts: Date.now()});
-  saveSessionState();
   updateSessionUI();
   sessionTimer = setInterval(updateSessionUI, 1000);
   showToast('🎬 session started');
@@ -169,7 +135,6 @@ window.pauseSession = function() {
     sessionLog.push({action:'resumed', ts: Date.now()});
     showToast('▶ session resumed');
   }
-  saveSessionState();
   updateSessionUI();
 };
 
@@ -179,7 +144,6 @@ window.stopSession = function() {
   sessionLog.push({action:'stopped', ts: Date.now()});
   const elapsed = getSessionElapsed();
   sessionActive = false; sessionPaused = false;
-  clearSessionState();
   updateSessionUI();
   const sw = document.getElementById('sessionWidget');
   if (sw) sw.classList.remove('active');
@@ -192,8 +156,12 @@ window.stopSession = function() {
       updateSessionStatsUI();
     } catch(e){}
   }).catch(()=>{});
-  // Ask to post — in-app modal
-  setTimeout(() => { showSessionCompleteModal(elapsed); }, 500);
+  // Ask to post
+  setTimeout(() => {
+    if (confirm('📸 Session complete! Want to log a post now?')) {
+      document.getElementById('pinp1').focus();
+    }
+  }, 500);
 };
 
 function updateSessionUI() {
@@ -208,211 +176,32 @@ function updateSessionUI() {
 
 // Session stats rendering
 let allSessions = {Monish:[], Prashanth:[]};
-let allSessionKeys = {Monish:{}, Prashanth:{}}; // firebaseKey -> session obj
 function listenSessions() {
   import("https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js").then(({ref, onValue}) => {
     try {
       onValue(ref(db, 'sessions'), snap => {
         const d = snap.val() || {};
-        // Store both values and key->obj maps for deletion
-        allSessionKeys = {
-          Monish: d.Monish || {},
-          Prashanth: d.Prashanth || {}
-        };
-        allSessions = {
-          Monish: Object.entries(d.Monish||{}).map(([k,v])=>({...v,_key:k})),
-          Prashanth: Object.entries(d.Prashanth||{}).map(([k,v])=>({...v,_key:k}))
-        };
+        allSessions = {Monish: Object.values(d.Monish||{}), Prashanth: Object.values(d.Prashanth||{})};
         updateSessionStatsUI();
       });
     } catch(e) {}
   }).catch(()=>{});
 }
-
-window.deleteSession = function(user, key) {
-  import("https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js").then(({ref, remove}) => {
-    try {
-      remove(ref(db, `sessions/${user}/${key}`));
-      showToast('session deleted ✓');
-    } catch(e) {}
-  }).catch(()=>{});
-};
-let selectedSessionKey = null; // { user, key }
-
 function updateSessionStatsUI() {
   ['statsSessionChart', 'statsSessionChart2'].forEach(id => {
     const el = document.getElementById(id);
     if (!el) return;
-    buildSessionCompareChart(el, id);
+    const mine = allSessions[ME] || [];
+    const last7 = mine.slice(-7);
+    if (!last7.length) { el.innerHTML = '<div style="text-align:center;padding:20px;font-family:Space Mono,monospace;font-size:9px;color:rgba(255,255,255,0.3)">no sessions yet — use 🎬 on home to record</div>'; return; }
+    const maxDur = Math.max(...last7.map(s => s.duration || 0)) || 1;
+    el.innerHTML = '<div style="display:flex;align-items:flex-end;gap:6px;height:80px;padding:0 4px">' +
+      last7.map((s,i) => {
+        const h = Math.round((s.duration / maxDur) * 70) + 10;
+        return `<div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:3px"><div style="width:100%;height:${h}px;background:var(--u1-accl);border:1px solid var(--u1-brd2);border-radius:2px;transition:all 0.3s" title="${fmtTime(s.duration||0)}"></div><div style="font-family:Space Mono,monospace;font-size:7px;color:rgba(255,255,255,0.4)">${s.date||''}</div></div>`;
+      }).join('') + '</div>';
   });
 }
-
-function buildSessionCompareChart(el, chartId) {
-  const mine = (allSessions[ME] || []).slice().sort((a,b) => (a.ts||0)-(b.ts||0));
-  const theirs = (allSessions[FRIEND()] || []).slice().sort((a,b) => (a.ts||0)-(b.ts||0));
-  // Collect all unique dates from both
-  const dateSet = new Set([...mine.map(s=>s.date||''), ...theirs.map(s=>s.date||'')].filter(Boolean));
-  // Build last 10 dates (most recent)
-  const allDates = [...dateSet].sort((a,b) => {
-    const pa = mine.find(s=>s.date===a)||theirs.find(s=>s.date===a);
-    const pb = mine.find(s=>s.date===b)||theirs.find(s=>s.date===b);
-    return (pa?.ts||0)-(pb?.ts||0);
-  }).slice(-10);
-
-  if (!mine.length && !theirs.length) {
-    el.innerHTML = '<div style="text-align:center;padding:20px;font-family:Space Mono,monospace;font-size:9px;color:rgba(255,255,255,0.3)">no sessions yet — use 🎬 on home to record</div>';
-    return;
-  }
-
-  // Group durations by date per user
-  const myByDate = {}, frByDate = {};
-  mine.forEach(s => { if(s.date) myByDate[s.date] = (myByDate[s.date]||0) + (s.duration||0); });
-  theirs.forEach(s => { if(s.date) frByDate[s.date] = (frByDate[s.date]||0) + (s.duration||0); });
-
-  const maxDur = Math.max(1, ...Object.values(myByDate), ...Object.values(frByDate));
-  const tipId = chartId + '_tip';
-
-  el.style.position = 'relative';
-  el.innerHTML = `
-    <div style="display:flex;gap:8px;margin-bottom:6px;align-items:center">
-      <span style="font-family:Space Mono,monospace;font-size:7px;color:var(--u1-acc)">■ ${ME}</span>
-      <span style="font-family:Space Mono,monospace;font-size:7px;color:var(--u2-acc)">■ ${FRIEND()}</span>
-      <span id="${chartId}_delhint" style="margin-left:auto;font-family:Space Mono,monospace;font-size:6px;color:rgba(255,255,255,0.25);display:none">click bar to select · 🗑 to delete</span>
-    </div>
-    <div id="${tipId}" style="display:none;position:absolute;top:-30px;left:50%;transform:translateX(-50%);background:rgba(4,8,18,0.97);border:1px solid rgba(0,255,200,0.25);padding:3px 10px;font-family:Space Mono,monospace;font-size:8px;color:#e0f5ef;border-radius:3px;white-space:nowrap;z-index:100;pointer-events:none"></div>
-    <div style="display:flex;align-items:flex-end;gap:4px;height:90px;padding:0 2px" id="${chartId}_bars"></div>
-    <div id="${chartId}_delbar" style="margin-top:8px;padding:6px 8px;background:rgba(255,60,60,0.08);border:1px solid rgba(255,60,60,0.25);border-radius:3px;align-items:center;justify-content:space-between;gap:8px;display:none">
-      <span id="${chartId}_dellabel" style="font-family:Space Mono,monospace;font-size:8px;color:rgba(255,255,255,0.6)"></span>
-      <button onclick="confirmDeleteSession('${chartId}')" style="background:rgba(255,60,60,0.2);border:1px solid rgba(255,60,60,0.4);color:#ff6060;font-family:Orbitron,monospace;font-size:7px;font-weight:700;padding:4px 10px;cursor:pointer;border-radius:2px;letter-spacing:0.06em">🗑 DELETE</button>
-      <button onclick="deselectSession('${chartId}')" style="background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.1);color:rgba(255,255,255,0.35);font-family:Space Mono,monospace;font-size:7px;padding:4px 8px;cursor:pointer;border-radius:2px">✕</button>
-    </div>
-  `;
-
-  const barsEl = document.getElementById(chartId + '_bars');
-  const tip = document.getElementById(tipId);
-
-  allDates.forEach(date => {
-    const myDur = myByDate[date] || 0;
-    const frDur = frByDate[date] || 0;
-    const h1 = myDur ? Math.round((myDur/maxDur)*76)+6 : 4;
-    const h2 = frDur ? Math.round((frDur/maxDur)*76)+6 : 4;
-
-    // Find individual sessions for this date (for deletion)
-    const mySess = mine.filter(s => s.date === date);
-    const frSess = theirs.filter(s => s.date === date);
-
-    const col = document.createElement('div');
-    col.style.cssText = 'flex:1;display:flex;flex-direction:column;align-items:center;gap:1px;min-width:0';
-
-    const barsRow = document.createElement('div');
-    barsRow.style.cssText = 'width:100%;display:flex;gap:2px;align-items:flex-end;height:82px';
-
-    // My bar
-    const b1 = document.createElement('div');
-    b1.className = 'sess-cmp-bar';
-    b1.dataset.user = ME;
-    b1.dataset.date = date;
-    b1.dataset.dur = fmtTime(myDur);
-    b1.dataset.keys = JSON.stringify(mySess.map(s=>s._key));
-    b1.style.cssText = `flex:1;height:${h1}px;background:${myDur?'var(--u1-accl)':'rgba(255,255,255,0.04)'};border:1px solid ${myDur?'var(--u1-brd2)':'rgba(255,255,255,0.06)'};border-radius:2px 2px 0 0;cursor:${mySess.length&&ME===ME?'pointer':'default'};transition:all 0.2s`;
-    if (mySess.length) b1.style.cursor = 'pointer';
-
-    // Friend bar
-    const b2 = document.createElement('div');
-    b2.className = 'sess-cmp-bar';
-    b2.dataset.user = FRIEND();
-    b2.dataset.date = date;
-    b2.dataset.dur = fmtTime(frDur);
-    b2.dataset.keys = JSON.stringify(frSess.map(s=>s._key));
-    b2.style.cssText = `flex:1;height:${h2}px;background:${frDur?'var(--u2-accl)':'rgba(255,255,255,0.04)'};border:1px solid ${frDur?'var(--u2-brd2)':'rgba(255,255,255,0.06)'};border-radius:2px 2px 0 0;cursor:default;transition:all 0.2s`;
-    // Only my sessions are deletable
-    if (mySess.length > 0) {
-      b1.addEventListener('click', () => selectSessionBar(chartId, b1, date, ME, mySess));
-    }
-
-    [b1,b2].forEach(bar => {
-      bar.addEventListener('mouseenter', () => {
-        const u = bar.dataset.user; const dur = bar.dataset.dur; const d = bar.dataset.date;
-        tip.textContent = `${u} · ${d}: ${dur}`;
-        tip.style.display = 'block';
-      });
-      bar.addEventListener('mouseleave', () => { tip.style.display = 'none'; });
-    });
-
-    barsRow.appendChild(b1);
-    barsRow.appendChild(b2);
-
-    const lbl = document.createElement('div');
-    lbl.style.cssText = 'font-family:Space Mono,monospace;font-size:6px;color:rgba(255,255,255,0.3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;width:100%;text-align:center;margin-top:2px';
-    lbl.textContent = date || '';
-
-    col.appendChild(barsRow);
-    col.appendChild(lbl);
-    barsEl.appendChild(col);
-  });
-}
-
-function selectSessionBar(chartId, barEl, date, user, sessions) {
-  const delbar = document.getElementById(chartId + '_delbar');
-  const dellabel = document.getElementById(chartId + '_dellabel');
-  const delhint = document.getElementById(chartId + '_delhint');
-  if (!delbar) return;
-
-  // Deselect if same bar clicked again
-  if (barEl.classList.contains('sess-selected')) {
-    deselectSession(chartId);
-    return;
-  }
-
-  // Clear previous selection across all charts
-  document.querySelectorAll('.sess-cmp-bar.sess-selected').forEach(b => {
-    b.classList.remove('sess-selected');
-    b.style.filter = '';
-    b.style.outline = '';
-  });
-
-  barEl.classList.add('sess-selected');
-  barEl.style.filter = 'brightness(1.7)';
-  barEl.style.outline = '2px solid var(--u1-acc)';
-
-  const totalDur = sessions.reduce((a,s) => a + (s.duration||0), 0);
-  if (dellabel) dellabel.textContent = `${date} · ${sessions.length} session${sessions.length!==1?'s':''} · ${fmtTime(totalDur)}`;
-
-  delbar.dataset.pendingUser = user;
-  delbar.dataset.pendingKeys = JSON.stringify(sessions.map(s => s._key).filter(Boolean));
-  delbar.style.display = 'flex';
-
-  if (delhint) delhint.style.display = 'inline';
-}
-
-window.deselectSession = function(chartId) {
-  const delbar = document.getElementById(chartId + '_delbar');
-  if (delbar) {
-    delbar.style.display = 'none';
-    delbar.dataset.pendingUser = '';
-    delbar.dataset.pendingKeys = '[]';
-  }
-  document.querySelectorAll('.sess-cmp-bar.sess-selected').forEach(b => {
-    b.classList.remove('sess-selected');
-    b.style.filter = '';
-    b.style.outline = '';
-  });
-};
-
-window.confirmDeleteSession = function(chartId) {
-  const delbar = document.getElementById(chartId + '_delbar');
-  if (!delbar) return;
-  const user = delbar.dataset.pendingUser;
-  const keys = JSON.parse(delbar.dataset.pendingKeys || '[]');
-  if (!user || !keys.length) { showToast('nothing selected'); return; }
-  import("https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js").then(({ref, remove}) => {
-    keys.forEach(k => {
-      if (k) remove(ref(db, `sessions/${user}/${k}`)).catch(()=>{});
-    });
-    showToast(`🗑 deleted ${keys.length} session${keys.length!==1?'s':''}`);
-    deselectSession(chartId);
-  }).catch(()=>{});
-};
 
 let imgData = null;
 let allPosts = { Monish: {}, Prashanth: {} };
@@ -420,7 +209,7 @@ let streaks = { Monish: 0, Prashanth: 0 };
 let lastPostDate = { Monish: '', Prashanth: '' };
 let hmapRange = { Monish: 30, Prashanth: 30 };
 let daysPer = { Monish: 1, Prashanth: 1 };
-let settings = { uiStyle:'default', u1Hex:'#00ffc8', u2Hex:'#ff00cc', appName:'ZENITH-FORGE', quotes:true, tgToken:'8793839990:AAEtmAlQ1-BlSyuBJ1cKmVme6Q7YLE7PCnw', tgChat:'-5191928580', driveUrl:'', quickLaunchKey:'q' };
+let settings = { uiStyle:'default', u1Hex:'#00ffc8', u2Hex:'#ff00cc', appName:'ZENITH-FORGE', quotes:true, tgToken:'8793839990:AAEtmAlQ1-BlSyuBJ1cKmVme6Q7YLE7PCnw', tgChat:'-5191928580', driveUrl:'' };
 
 function FRIEND() { return ME === 'Monish' ? 'Prashanth' : 'Monish'; }
 
@@ -476,19 +265,13 @@ function initUI() {
   document.getElementById('logoutBtn').textContent = 'logout (' + ME + ')';
   updateQuote();
   buildTGrids(); // builds style grid + color grids
-  loadTodos();
   const qb = document.getElementById('qbar'); if(qb) qb.style.visibility = settings.quotes ? 'visible' : 'hidden';
   document.getElementById('tog-quotes').classList.toggle('on', settings.quotes);
   // populate saved config
   // Start on home tab
-  setTimeout(() => {
-    goTab('home'); listenSessions(); restoreSessionState(); updateSessionUI();
-  }, 100);
+  setTimeout(() => { goTab('home'); listenSessions(); updateSessionUI(); }, 100);
   // telegram configured internally
   if (settings.driveUrl) document.getElementById('driveUrlInp').value = settings.driveUrl;
-  // Quick launch key
-  const qlInp = document.getElementById('qlKeyInp'); if(qlInp) qlInp.value = settings.quickLaunchKey || 'q';
-  const qlDisp = document.getElementById('qlKeyDisplay'); if(qlDisp) qlDisp.textContent = (settings.quickLaunchKey || 'q').toUpperCase();
 }
 
 // ── FIREBASE LISTENERS ──
@@ -653,7 +436,7 @@ window.saveEdit = async function() {
   showToast('post updated ✓');
 };
 window.confirmDelete = async function(key) {
-  if (!await showConfirmModal('delete this post?', 'This cannot be undone.')) return;
+  if (!confirm('delete this post?')) return;
   await remove(ref(db, `posts/${ME}/${key}`));
 
   // recalculate streak from remaining posts
@@ -751,8 +534,6 @@ function buildHmap(user, days) {
   if (!grid) return;
   const posts = Object.values(allPosts[user] || {});
   const postDates = new Set(posts.map(p => p.date));
-  const postCounts = {};
-  posts.forEach(p => { postCounts[p.date] = (postCounts[p.date]||0)+1; });
   const dp = daysPer[user];
   grid.innerHTML = '';
   grid.style.display = 'flex';
@@ -760,23 +541,15 @@ function buildHmap(user, days) {
   grid.style.gap = '3px';
   const today = new Date();
   const totalSquares = Math.ceil(days / dp);
-  // Shared tooltip
-  let hmapTip = document.getElementById('hmapTip_'+user);
-  if (!hmapTip) {
-    hmapTip = document.createElement('div');
-    hmapTip.id = 'hmapTip_'+user;
-    hmapTip.style.cssText='display:none;position:fixed;background:rgba(4,8,18,0.97);border:1px solid rgba(0,255,200,0.25);padding:3px 9px;font-family:Space Mono,monospace;font-size:8px;color:#e0f5ef;border-radius:3px;white-space:nowrap;z-index:9000;pointer-events:none';
-    document.body.appendChild(hmapTip);
-  }
   for (let i = totalSquares - 1; i >= 0; i--) {
-    let hasPost = false, isToday = false, titleDates = [], totalCnt = 0;
+    let hasPost = false, isToday = false, titleDates = [];
     for (let j = 0; j < dp; j++) {
       const dayAgo = i * dp + j;
       const d = new Date(today);
       d.setDate(today.getDate() - dayAgo);
       const ds = d.toLocaleDateString([], {day:'numeric', month:'short'});
       titleDates.push(ds);
-      if (postDates.has(ds)) { hasPost = true; totalCnt += postCounts[ds]||0; }
+      if (postDates.has(ds)) hasPost = true;
       if (dayAgo === 0) isToday = true;
     }
     const cell = document.createElement('div');
@@ -786,6 +559,7 @@ function buildHmap(user, days) {
     cell.style.flexShrink = '0';
     cell.style.cursor = 'default';
     cell.style.transition = 'all 0.15s';
+    cell.title = titleDates.join(' – ');
     if (hasPost) {
       cell.style.border = `1px solid var(--${col}-brd2)`;
       cell.style.background = `var(--${col}-accl)`;
@@ -797,10 +571,6 @@ function buildHmap(user, days) {
       cell.style.border = '1px solid rgba(255,255,255,0.07)';
       cell.style.background = 'rgba(255,255,255,0.03)';
     }
-    const tipLabel = titleDates.join(' – ') + (hasPost ? ` · ${totalCnt} post${totalCnt!==1?'s':''}` : ' · missed');
-    cell.addEventListener('mouseenter', e => { hmapTip.textContent=tipLabel; hmapTip.style.display='block'; hmapTip.style.left=(e.clientX+10)+'px'; hmapTip.style.top=(e.clientY-26)+'px'; });
-    cell.addEventListener('mousemove', e => { hmapTip.style.left=(e.clientX+10)+'px'; hmapTip.style.top=(e.clientY-26)+'px'; });
-    cell.addEventListener('mouseleave', () => { hmapTip.style.display='none'; });
     grid.appendChild(cell);
   }
 }
@@ -879,7 +649,18 @@ window.makePost = async function() {
   clearImg();
   // Ask time spent if no session was running
   if (!sessionActive && !pendingPostAfterSession) {
-    setTimeout(() => { showTimeInputModal(); }, 800);
+    setTimeout(() => {
+      const mins = prompt('⏱ How long did you work on this today? (minutes, or leave blank to skip)');
+      if (mins && !isNaN(parseInt(mins))) {
+        const ms = parseInt(mins) * 60000;
+        // Save as a quick session
+        const sid = Date.now();
+        import("https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js").then(({ref, push}) => {
+          try { push(ref(db, `sessions/${ME}`), {ts: sid, duration: ms, log: 1, user: ME, date: new Date().toLocaleDateString([],{day:'numeric',month:'short'})}); updateSessionStatsUI(); } catch(e) {}
+        }).catch(()=>{});
+        showToast(`⏱ logged ${mins}min work session`);
+      }
+    }, 800);
   }
   pendingPostAfterSession = false;
   // Push to Firebase
@@ -930,7 +711,9 @@ window.goTab = function(tab) {
     document.body.classList.add('on-home');
     renderHomeWidgets();
     startHomeClock();
-    renderTodos();
+    // populate quote
+    const hq = document.getElementById('homeQuote');
+    if (hq) hq.textContent = '"' + QUOTES[Math.floor(Math.random()*QUOTES.length)] + '"';
   } else {
     document.body.classList.remove('on-home');
   }
@@ -1049,23 +832,19 @@ function buildHomeBarChart(containerId) {
   const frPosts = Object.values(allPosts[FRIEND()]||{});
   const today = new Date();
   const days = 14;
-  const labels=[], myD=[], frD=[], fullDates=[];
+  const labels=[], myD=[], frD=[];
   for(let i=days-1;i>=0;i--){
     const d=new Date(today); d.setDate(today.getDate()-i);
     const ds=d.toLocaleDateString([],{day:'numeric',month:'short'});
-    fullDates.push(ds);
     labels.push(i===0?'today':i===1?'yday':d.toLocaleDateString([],{weekday:'short'}));
     myD.push(myPosts.filter(p=>p.date===ds).length);
     frD.push(frPosts.filter(p=>p.date===ds).length);
   }
   const max=Math.max(1,...myD,...frD);
-  const tooltipId = containerId+'_tip';
-  c.style.position='relative';
-  c.innerHTML = `<div id="${tooltipId}" style="display:none;position:absolute;top:-32px;left:50%;transform:translateX(-50%);background:rgba(4,8,18,0.97);border:1px solid rgba(0,255,200,0.25);padding:4px 10px;font-family:Space Mono,monospace;font-size:8px;color:#e0f5ef;border-radius:3px;white-space:nowrap;z-index:100;pointer-events:none"></div>` +
-    `<div style="display:flex;align-items:flex-end;gap:2px;height:50px;padding:0 2px">` +
+  c.innerHTML = `<div style="display:flex;align-items:flex-end;gap:2px;height:50px;padding:0 2px">` +
     labels.map((l,i)=>{
       const h1=Math.round((myD[i]/max)*44)+2, h2=Math.round((frD[i]/max)*44)+2;
-      return `<div class="hbar-col" data-label="${fullDates[i]}" data-me="${myD[i]}" data-fr="${frD[i]}" style="flex:1;display:flex;flex-direction:column;align-items:center;gap:1px;position:relative;cursor:default">
+      return `<div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:1px;position:relative" title="${l}: you ${myD[i]}, friend ${frD[i]}">
         <div style="width:100%;display:flex;gap:1px;align-items:flex-end;height:46px">
           <div style="flex:1;height:${h1}px;background:${myD[i]>0?'var(--u1-accl)':'rgba(255,255,255,0.04)'};border-radius:1px 1px 0 0;border:${myD[i]>0?'1px solid var(--u1-brd2)':'1px solid rgba(255,255,255,0.04)'}"></div>
           <div style="flex:1;height:${h2}px;background:${frD[i]>0?'var(--u2-accl)':'rgba(255,255,255,0.04)'};border-radius:1px 1px 0 0;border:${frD[i]>0?'1px solid var(--u2-brd2)':'1px solid rgba(255,255,255,0.04)'}"></div>
@@ -1076,40 +855,24 @@ function buildHomeBarChart(containerId) {
       <span style="font-family:Space Mono,monospace;font-size:7px;color:var(--u1-acc)">■ me</span>
       <span style="font-family:Space Mono,monospace;font-size:7px;color:var(--u2-acc)">■ friend</span>
     </div>`;
-  // Attach hover events
-  const tip = document.getElementById(tooltipId);
-  c.querySelectorAll('.hbar-col').forEach(col => {
-    col.addEventListener('mouseenter', e => {
-      const lbl=col.dataset.label, me=col.dataset.me, fr=col.dataset.fr;
-      tip.textContent = `${lbl} · me:${me} · friend:${fr}`;
-      const rect=col.getBoundingClientRect(), cRect=c.getBoundingClientRect();
-      tip.style.display='block';
-      tip.style.left = (col.offsetLeft + col.offsetWidth/2)+'px';
-    });
-    col.addEventListener('mouseleave', () => { tip.style.display='none'; });
-  });
 }
 
 // ── FAVORITE APPS ──
 const DEFAULT_FAV_APPS = [
-  {icon:'🐙',name:'GitHub',url:'https://github.com',wheel:true},
-  {icon:'🤖',name:'ChatGPT',url:'https://chat.openai.com',wheel:true},
-  {icon:'▶️',name:'YouTube',url:'https://youtube.com',wheel:true},
-  {icon:'📓',name:'Notion',url:'https://notion.so',wheel:true},
-  {icon:'🎨',name:'Figma',url:'https://figma.com',wheel:true},
-  {icon:'𝕏',name:'X',url:'https://x.com',wheel:true},
-  {icon:'📐',name:'Linear',url:'https://linear.app',wheel:true},
-  {icon:'🔵',name:'Claude',url:'https://claude.ai',wheel:true},
+  {icon:'🐙',name:'GitHub',url:'https://github.com'},
+  {icon:'🤖',name:'ChatGPT',url:'https://chat.openai.com'},
+  {icon:'▶️',name:'YouTube',url:'https://youtube.com'},
+  {icon:'📓',name:'Notion',url:'https://notion.so'},
+  {icon:'🎨',name:'Figma',url:'https://figma.com'},
+  {icon:'𝕏',name:'X',url:'https://x.com'},
+  {icon:'📐',name:'Linear',url:'https://linear.app'},
+  {icon:'🔵',name:'Claude',url:'https://claude.ai'},
 ];
 
 function getFavApps() {
   try {
     const saved = localStorage.getItem('epoch_favapps');
-    if (saved) {
-      const apps = JSON.parse(saved);
-      // Migrate old entries that don't have a wheel property
-      return apps.map(a => ('wheel' in a) ? a : {...a, wheel: true});
-    }
+    if (saved) return JSON.parse(saved);
   } catch(e){}
   return DEFAULT_FAV_APPS;
 }
@@ -1131,458 +894,30 @@ function renderFavApps() {
   </div>`;
 }
 
-// ── GTA5-STYLE QUICK LAUNCH WHEEL ──
-let wheelOpen = false;
-let wheelHeld = false;
-let wheelHoldTimer = null;
-let wheelSelectedIdx = -1;
-let wheelMouseX = 0, wheelMouseY = 0;
-const WHEEL_HOLD_MS = 180; // ms hold to open
-
-function getWheelApps() {
-  const all = getFavApps();
-  const selected = all.filter(a => a.wheel !== false);
-  return selected.length > 0 ? selected : all; // fallback: show all if none selected
-}
-
-function openQuickWheel() {
-  if (wheelOpen) return;
-  wheelOpen = true;
-  wheelSelectedIdx = -1;
-  const overlay = document.getElementById('quickWheelOverlay');
-  if (!overlay) return;
-  overlay.style.display = 'flex';
-  requestAnimationFrame(() => overlay.classList.add('qw-visible'));
-  renderWheelSlots();
-  showToast('⚡ quick launch — aim & release');
-}
-
-function closeQuickWheel(launch) {
-  if (!wheelOpen) return;
-  wheelOpen = false;
-  const overlay = document.getElementById('quickWheelOverlay');
-  if (!overlay) return;
-  overlay.classList.remove('qw-visible');
-  setTimeout(() => { overlay.style.display = 'none'; }, 260);
-  if (launch && wheelSelectedIdx >= 0) {
-    const apps = getWheelApps();
-    const app = apps[wheelSelectedIdx];
-    if (app && app.url) {
-      setTimeout(() => window.open(app.url, '_blank'), 120);
-    }
-  }
-  wheelSelectedIdx = -1;
-  updateWheelHighlight(-1);
-}
-
-function renderWheelSlots() {
-  const apps = getWheelApps();
-  const count = apps.length;
-  const slotWrap = document.getElementById('qwSlots');
-  if (!slotWrap) return;
-  slotWrap.innerHTML = '';
-  const R = 115; // midpoint between r1=48 and r2=182
-  for (let i = 0; i < count; i++) {
-    const angle = ((i + 0.5) / count) * Math.PI * 2 - Math.PI / 2; // center of sector
-    const x = Math.cos(angle) * R;
-    const y = Math.sin(angle) * R;
-    const a = apps[i];
-    const slot = document.createElement('div');
-    slot.className = 'qw-slot';
-    slot.id = 'qwSlot' + i;
-    slot.dataset.x = x;
-    slot.dataset.y = y;
-    // Start collapsed at center
-    slot.style.transform = `translate(-50%, -50%) scale(0.5)`;
-    slot.style.transitionDelay = `${i * 28}ms`;
-    slot.innerHTML = `<div class="qw-slot-icon">${a.icon}</div><div class="qw-slot-name">${a.name}</div>`;
-    slotWrap.appendChild(slot);
-    // Animate out after paint
-    requestAnimationFrame(() => requestAnimationFrame(() => {
-      slot.style.transform = `translate(calc(-50% + ${x}px), calc(-50% + ${y}px)) scale(1)`;
-    }));
-  }
-  // Sector lines
-  const svg = document.getElementById('qwSectors');
-  if (svg) {
-    const cx = 200, cy = 200, r1 = 48, r2 = 182;
-    let paths = '';
-    for (let i = 0; i < count; i++) {
-      const a1 = (i / count) * Math.PI * 2 - Math.PI / 2;
-      const a2 = ((i + 1) / count) * Math.PI * 2 - Math.PI / 2;
-      const x1 = cx + Math.cos(a1) * r2, y1 = cy + Math.sin(a1) * r2;
-      const x2 = cx + Math.cos(a2) * r2, y2 = cy + Math.sin(a2) * r2;
-      const ix1 = cx + Math.cos(a1) * r1, iy1 = cy + Math.sin(a1) * r1;
-      const ix2 = cx + Math.cos(a2) * r2, iy2 = cy + Math.sin(a2) * r2;
-      paths += `<path class="qw-sector" id="qwSec${i}" d="M${cx + Math.cos(a1)*r1} ${cy + Math.sin(a1)*r1} L${cx + Math.cos(a1)*r2} ${cy + Math.sin(a1)*r2} A${r2} ${r2} 0 0 1 ${cx + Math.cos(a2)*r2} ${cy + Math.sin(a2)*r2} L${cx + Math.cos(a2)*r1} ${cy + Math.sin(a2)*r1} A${r1} ${r1} 0 0 0 ${cx + Math.cos(a1)*r1} ${cy + Math.sin(a1)*r1} Z"/>`;
-    }
-    // Divider lines
-    for (let i = 0; i < count; i++) {
-      const a = (i / count) * Math.PI * 2 - Math.PI / 2;
-      paths += `<line class="qw-divider" x1="${cx + Math.cos(a)*r1}" y1="${cy + Math.sin(a)*r1}" x2="${cx + Math.cos(a)*r2}" y2="${cy + Math.sin(a)*r2}"/>`;
-    }
-    svg.innerHTML = paths;
-  }
-}
-
-function updateWheelHighlight(idx) {
-  const apps = getWheelApps();
-  for (let i = 0; i < apps.length; i++) {
-    const slot = document.getElementById('qwSlot' + i);
-    const sec = document.getElementById('qwSec' + i);
-    const active = i === idx;
-    if (slot) {
-      slot.classList.toggle('qw-active', active);
-      const x = parseFloat(slot.dataset.x) || 0;
-      const y = parseFloat(slot.dataset.y) || 0;
-      slot.style.transform = `translate(calc(-50% + ${x}px), calc(-50% + ${y}px)) scale(${active ? 1.13 : 1})`;
-    }
-    if (sec) sec.classList.toggle('qw-sec-active', active);
-  }
-  const label = document.getElementById('qwCenterLabel');
-  if (label) {
-    if (idx >= 0 && apps[idx]) {
-      label.textContent = apps[idx].name;
-      label.style.opacity = '1';
-    } else {
-      label.textContent = 'QUICK LAUNCH';
-      label.style.opacity = '0.35';
-    }
-  }
-}
-
-function onWheelMouseMove(e) {
-  if (!wheelOpen) return;
-  const overlay = document.getElementById('quickWheelOverlay');
-  if (!overlay) return;
-  const rect = overlay.getBoundingClientRect();
-  const cx = rect.left + rect.width / 2;
-  const cy = rect.top + rect.height / 2;
-  const dx = e.clientX - cx;
-  const dy = e.clientY - cy;
-  const dist = Math.sqrt(dx*dx + dy*dy);
-  if (dist < 40) { updateWheelHighlight(-1); wheelSelectedIdx = -1; return; }
-  const apps = getWheelApps();
-  const count = apps.length;
-  let angle = Math.atan2(dy, dx) + Math.PI / 2;
-  if (angle < 0) angle += Math.PI * 2;
-  const idx = Math.floor((angle / (Math.PI * 2)) * count) % count;
-  if (idx !== wheelSelectedIdx) {
-    wheelSelectedIdx = idx;
-    updateWheelHighlight(idx);
-    // Haptic-style micro rumble via CSS
-    const slot = document.getElementById('qwSlot' + idx);
-    if (slot) { slot.classList.add('qw-ping'); setTimeout(() => slot.classList.remove('qw-ping'), 150); }
-  }
-}
-
-// Key handling
-document.addEventListener('keydown', (e) => {
-  if (!document.getElementById('mainApp') || document.getElementById('mainApp').style.display === 'none') return;
-  const key = (settings.quickLaunchKey || 'q').toLowerCase();
-  if (e.key.toLowerCase() !== key) return;
-  if (e.repeat) return;
-  if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
-  // Only on home tab
-  if (!document.body.classList.contains('on-home')) return;
-  if (wheelHeld) return;
-  wheelHeld = true;
-  wheelHoldTimer = setTimeout(() => { openQuickWheel(); }, WHEEL_HOLD_MS);
-});
-
-document.addEventListener('keyup', (e) => {
-  const key = (settings.quickLaunchKey || 'q').toLowerCase();
-  if (e.key.toLowerCase() !== key) return;
-  wheelHeld = false;
-  if (wheelHoldTimer) { clearTimeout(wheelHoldTimer); wheelHoldTimer = null; }
-  if (wheelOpen) closeQuickWheel(true);
-});
-
-document.addEventListener('mousemove', onWheelMouseMove);
-
-// Escape to close without launching
-document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape' && wheelOpen) { closeQuickWheel(false); wheelHeld = false; }
-});
-
-// Settings: update quickLaunchKey
-window.saveQuickLaunchKey = function() {
-  const inp = document.getElementById('qlKeyInp');
-  if (!inp) return;
-  const v = inp.value.trim().toLowerCase();
-  if (!v || v.length !== 1) { showToast('enter a single key'); return; }
-  settings.quickLaunchKey = v;
-  saveSettings();
-  inp.value = v;
-  const qlDisp = document.getElementById('qlKeyDisplay'); if(qlDisp) qlDisp.textContent = v.toUpperCase();
-  showToast(`quick launch key set to [${v.toUpperCase()}]`);
-};
-
-window.openQuickWheelPreview = function() {
-  if (!document.body.classList.contains('on-home')) { goTab('home'); setTimeout(openQuickWheel, 200); return; }
-  openQuickWheel();
-};
-
-// ── FAV EDITOR STATE ──
-let fedPendingImage = null; // base64 sci-fi tinted image or null
-let fedPendingEmoji = '🌐';
-
-// Quick emoji options for the picker
-const FED_QUICK_EMOJIS = ['🌐','🐙','📐','🔵','𝕏','🔴','💻','📊','🎯','⚡','🛠️','📧','📅','🗂️','💬','🎨'];
-
-function buildFedEmojiPicker() {
-  const c = document.getElementById('fedEmojiPicker');
-  if (!c) return;
-  c.innerHTML = FED_QUICK_EMOJIS.map(e =>
-    `<div onclick="selectFedEmoji('${e}')" id="fedEP_${encodeURIComponent(e)}" style="width:24px;height:24px;border-radius:4px;border:1px solid rgba(255,255,255,0.08);background:rgba(255,255,255,0.03);cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:13px;transition:all 0.15s;flex-shrink:0"
-       onmouseover="this.style.background='var(--u1-acc2)';this.style.borderColor='var(--u1-brd2)'"
-       onmouseout="this.style.background='rgba(255,255,255,0.03)';this.style.borderColor='rgba(255,255,255,0.08)'">${e}</div>`
-  ).join('');
-}
-
-window.selectFedEmoji = function(emoji) {
-  fedPendingEmoji = emoji;
-  fedPendingImage = null; // clear image if emoji chosen
-  const emojiEl = document.getElementById('fedIconEmoji');
-  if (emojiEl) emojiEl.textContent = emoji;
-  const canvas = document.getElementById('fedIconCanvas');
-  if (canvas) canvas.style.display = 'none';
-  if (emojiEl) emojiEl.style.display = '';
-};
-
-// Apply sci-fi duotone tint to an image, matching the current --u1-acc color
-function applyScifiTint(imgEl, canvasEl, hexColor) {
-  const w = canvasEl.width, h = canvasEl.height;
-  const ctx = canvasEl.getContext('2d');
-  ctx.clearRect(0, 0, w, h);
-
-  // Draw source image scaled to fill
-  const scale = Math.max(w / imgEl.naturalWidth, h / imgEl.naturalHeight);
-  const sw = imgEl.naturalWidth * scale, sh = imgEl.naturalHeight * scale;
-  const sx = (w - sw) / 2, sy = (h - sh) / 2;
-  ctx.drawImage(imgEl, sx, sy, sw, sh);
-
-  // Get pixel data and apply duotone: dark bg color → accent color
-  const imageData = ctx.getImageData(0, 0, w, h);
-  const data = imageData.data;
-
-  // Parse hex accent color
-  const r1 = parseInt(hexColor.slice(1,3),16)||0;
-  const g1 = parseInt(hexColor.slice(3,5),16)||0;
-  const b1 = parseInt(hexColor.slice(5,7),16)||0;
-
-  for (let i = 0; i < data.length; i += 4) {
-    const lum = (data[i]*0.299 + data[i+1]*0.587 + data[i+2]*0.114) / 255;
-    // Map: dark → deep bg (#03050a), bright → accent color
-    // With slight desaturation to feel "scanned"
-    const t = Math.pow(lum, 0.85); // slight gamma for contrast
-    data[i]   = Math.round(3  + t * r1);   // R: from ~3 (bg) to accent R
-    data[i+1] = Math.round(5  + t * g1);   // G
-    data[i+2] = Math.round(10 + t * b1);   // B
-    // keep alpha, slightly boost dark areas for subtle scan effect
-    data[i+3] = Math.min(255, data[i+3] + 20);
-  }
-  ctx.putImageData(imageData, 0, 0);
-
-  // Overlay subtle scanlines
-  for (let y = 0; y < h; y += 2) {
-    ctx.fillStyle = 'rgba(0,0,0,0.18)';
-    ctx.fillRect(0, y, w, 1);
-  }
-
-  // Corner brackets overlay
-  const bS = 8, gap = 2;
-  ctx.strokeStyle = `rgba(${r1},${g1},${b1},0.7)`;
-  ctx.lineWidth = 1.5;
-  [[gap,gap],[w-gap,gap],[gap,h-gap],[w-gap,h-gap]].forEach(([cx,cy]) => {
-    const sx2 = cx <= gap ? 1 : -1, sy2 = cy <= gap ? 1 : -1;
-    ctx.beginPath(); ctx.moveTo(cx, cy + sy2*bS); ctx.lineTo(cx, cy); ctx.lineTo(cx + sx2*bS, cy); ctx.stroke();
-  });
-}
-
-window.handleFedImageUpload = function(input) {
-  const file = input.files[0];
-  if (!file) return;
-  const reader = new FileReader();
-  reader.onload = e => {
-    const img = new Image();
-    img.onload = () => {
-      const canvas = document.getElementById('fedIconCanvas');
-      if (!canvas) return;
-      // Get current accent hex from CSS var
-      const accentHex = getComputedStyle(document.documentElement).getPropertyValue('--u1-acc').trim() || '#00ffc8';
-      applyScifiTint(img, canvas, accentHex);
-      canvas.style.display = 'block';
-      const emojiEl = document.getElementById('fedIconEmoji');
-      if (emojiEl) emojiEl.style.display = 'none';
-      // Store tinted image as dataURL
-      fedPendingImage = canvas.toDataURL('image/png');
-    };
-    img.src = e.target.result;
-  };
-  reader.readAsDataURL(file);
-};
-
-// Auto-fetch favicon from a URL
-window.fetchFavicon = function() {
-  const url = document.getElementById('fedUrlInp')?.value?.trim();
-  if (!url) { showToast('enter a URL first'); return; }
-  try {
-    const host = new URL(url.startsWith('http') ? url : 'https://' + url).hostname;
-    const favUrl = `https://www.google.com/s2/favicons?domain=${host}&sz=64`;
-    showToast('⤓ fetching favicon...');
-    const img = new Image();
-    img.crossOrigin = 'anonymous';
-    img.onload = () => {
-      const canvas = document.getElementById('fedIconCanvas');
-      if (!canvas) return;
-      const accentHex = getComputedStyle(document.documentElement).getPropertyValue('--u1-acc').trim() || '#00ffc8';
-      applyScifiTint(img, canvas, accentHex);
-      canvas.style.display = 'block';
-      const emojiEl = document.getElementById('fedIconEmoji');
-      if (emojiEl) emojiEl.style.display = 'none';
-      fedPendingImage = canvas.toDataURL('image/png');
-      // Also auto-fill name from hostname if empty
-      const nameInp = document.getElementById('fedNameInp');
-      if (nameInp && !nameInp.value) nameInp.value = host.replace('www.','').split('.')[0];
-      showToast('favicon loaded ✓');
-    };
-    img.onerror = () => showToast('favicon not found — try uploading manually');
-    img.src = favUrl;
-  } catch(e) { showToast('invalid url'); }
-};
-
 window.openFavEditor = function() {
-  fedPendingImage = null;
-  fedPendingEmoji = '🌐';
+  const apps = getFavApps();
   const modal = document.getElementById('favEditorModal');
-  if (!modal) return;
-  // Reset add form
-  const nameInp = document.getElementById('fedNameInp'); if(nameInp) nameInp.value = '';
-  const urlInp = document.getElementById('fedUrlInp'); if(urlInp) urlInp.value = '';
-  const emojiEl = document.getElementById('fedIconEmoji'); if(emojiEl) { emojiEl.textContent = '🌐'; emojiEl.style.display = ''; }
-  const canvas = document.getElementById('fedIconCanvas'); if(canvas) canvas.style.display = 'none';
-  const imgUp = document.getElementById('fedImgUpload'); if(imgUp) imgUp.value = '';
-  buildFedEmojiPicker();
-  renderFavEditorCards(getFavApps());
+  const textarea = document.getElementById('favEditorTextarea');
+  if (!modal || !textarea) return;
+  textarea.value = apps.map(a => `${a.icon}|${a.name}|${a.url}`).join('\n');
   modal.style.display = 'flex';
 };
-
 window.closeFavEditor = function() {
   const modal = document.getElementById('favEditorModal');
   if (modal) modal.style.display = 'none';
 };
-
-let fedDragSrc = null;
-
-function renderFavEditorCards(apps) {
-  const list = document.getElementById('favEditorList');
-  if (!list) return;
-  list.innerHTML = '';
-  if (!apps.length) {
-    list.innerHTML = '<div style="font-family:Space Mono,monospace;font-size:8px;color:rgba(255,255,255,0.2);text-align:center;padding:16px">no shortcuts yet — add one above</div>';
-    return;
-  }
-  apps.forEach((a, i) => {
-    const inWheel = a.wheel !== false;
-    const card = document.createElement('div');
-    card.className = 'fav-ed-card';
-    card.id = 'fedCard' + i;
-    card.dataset.idx = i;
-    card.draggable = true;
-
-    // Icon: either tinted image or emoji
-    const iconHtml = a.img
-      ? `<div style="width:32px;height:32px;border-radius:4px;overflow:hidden;flex-shrink:0;border:1px solid var(--u1-brd);position:relative">
-           <img src="${a.img}" style="width:100%;height:100%;object-fit:cover;display:block" draggable="false">
-           <div style="position:absolute;inset:0;background:linear-gradient(135deg,transparent 60%,rgba(0,255,200,0.08))"></div>
-         </div>`
-      : `<span class="fav-ed-icon">${a.icon || '🌐'}</span>`;
-
-    card.innerHTML = `
-      <span class="fav-ed-drag" title="drag to reorder">⠿</span>
-      ${iconHtml}
-      <div class="fav-ed-info">
-        <div class="fav-ed-name">${a.name}</div>
-        <div class="fav-ed-url">${a.url}</div>
-      </div>
-      <button class="fav-ed-wheel-btn ${inWheel ? 'on' : ''}" onclick="toggleWheelApp(${i})" title="${inWheel ? 'remove from wheel' : 'add to wheel'}">⚡</button>
-      <button class="fav-ed-del" onclick="deleteFavApp(${i})" title="delete">✕</button>
-    `;
-    card.addEventListener('dragstart', e => {
-      fedDragSrc = i;
-      card.classList.add('fav-ed-dragging');
-      e.dataTransfer.effectAllowed = 'move';
-    });
-    card.addEventListener('dragend', () => {
-      card.classList.remove('fav-ed-dragging');
-      list.querySelectorAll('.fav-ed-card').forEach(c => c.classList.remove('fav-ed-over'));
-    });
-    card.addEventListener('dragover', e => {
-      e.preventDefault();
-      e.dataTransfer.dropEffect = 'move';
-      list.querySelectorAll('.fav-ed-card').forEach(c => c.classList.remove('fav-ed-over'));
-      card.classList.add('fav-ed-over');
-    });
-    card.addEventListener('dragleave', () => card.classList.remove('fav-ed-over'));
-    card.addEventListener('drop', e => {
-      e.preventDefault();
-      card.classList.remove('fav-ed-over');
-      const toIdx = parseInt(card.dataset.idx);
-      if (fedDragSrc === null || fedDragSrc === toIdx) return;
-      const apps2 = getFavApps();
-      const [moved] = apps2.splice(fedDragSrc, 1);
-      apps2.splice(toIdx, 0, moved);
-      saveFavAppsData(apps2);
-      renderFavEditorCards(apps2);
-      renderFavApps();
-    });
-    list.appendChild(card);
-  });
-}
-
-window.toggleWheelApp = function(idx) {
-  const apps = getFavApps();
-  if (!apps[idx]) return;
-  apps[idx].wheel = apps[idx].wheel === false ? true : false;
-  saveFavAppsData(apps);
-  renderFavEditorCards(apps);
-};
-
-window.deleteFavApp = function(idx) {
-  const apps = getFavApps();
-  apps.splice(idx, 1);
-  saveFavAppsData(apps);
-  renderFavEditorCards(apps);
-  renderFavApps();
-};
-
-window.addFavAppFromEditor = function() {
-  const name = (document.getElementById('fedNameInp')?.value || '').trim();
-  let url = (document.getElementById('fedUrlInp')?.value || '').trim();
-  if (!name || !url) { showToast('enter name + url'); return; }
-  if (!url.startsWith('http')) url = 'https://' + url;
-  const apps = getFavApps();
-  const newApp = { icon: fedPendingEmoji || '🌐', name, url, wheel: true };
-  if (fedPendingImage) newApp.img = fedPendingImage;
-  apps.push(newApp);
-  saveFavAppsData(apps);
-  renderFavEditorCards(apps);
-  renderFavApps();
-  // Reset form
-  const nameInp = document.getElementById('fedNameInp'); if(nameInp) nameInp.value = '';
-  const urlInp = document.getElementById('fedUrlInp'); if(urlInp) urlInp.value = '';
-  const emojiEl = document.getElementById('fedIconEmoji'); if(emojiEl) { emojiEl.textContent = '🌐'; emojiEl.style.display = ''; }
-  const canvas = document.getElementById('fedIconCanvas'); if(canvas) canvas.style.display = 'none';
-  const imgUp = document.getElementById('fedImgUpload'); if(imgUp) imgUp.value = '';
-  fedPendingImage = null; fedPendingEmoji = '🌐';
-  showToast(`${name} added ✓`);
-};
-
 window.saveFavEditor = function() {
+  const textarea = document.getElementById('favEditorTextarea');
+  if (!textarea) return;
+  const lines = textarea.value.trim().split('\n').filter(l=>l.trim());
+  const apps = lines.map(l => {
+    const p = l.split('|');
+    return {icon:(p[0]||'🌐').trim(), name:(p[1]||'App').trim(), url:(p[2]||'#').trim()};
+  }).filter(a => a.url !== '#' || a.name !== 'App');
+  saveFavAppsData(apps);
   renderFavApps();
   closeFavEditor();
-  showToast('shortcuts saved ✓');
+  showToast('apps updated ✓');
 };
 
 
@@ -1596,27 +931,14 @@ function buildMiniHmap(containerId, user) {
   c.style.display = 'flex';
   c.style.flexWrap = 'wrap';
   c.style.gap = '3px';
-  c.style.position = 'relative';
-  // Tooltip element
-  const tip = document.createElement('div');
-  tip.style.cssText = 'display:none;position:fixed;background:rgba(4,8,18,0.97);border:1px solid rgba(0,255,200,0.25);padding:3px 9px;font-family:Space Mono,monospace;font-size:8px;color:#e0f5ef;border-radius:3px;white-space:nowrap;z-index:9000;pointer-events:none';
-  document.body.appendChild(tip);
   const today = new Date();
   for (let i = 29; i >= 0; i--) {
     const d = new Date(today);
     d.setDate(today.getDate() - i);
     const ds = d.toLocaleDateString([], {day:'numeric', month:'short'});
-    const cnt = posts.filter(p=>p.date===ds).length;
     const cell = document.createElement('div');
     cell.style.cssText = `width:12px;height:12px;border-radius:2px;flex-shrink:0;border:1px solid ${postDates.has(ds) ? 'var(--'+col+'-brd2)' : 'rgba(255,255,255,0.07)'};background:${postDates.has(ds) ? 'var(--'+col+'-accl)' : 'rgba(255,255,255,0.03)'};cursor:default`;
-    cell.addEventListener('mouseenter', e => {
-      tip.textContent = `${ds}: ${cnt} post${cnt!==1?'s':''}`;
-      tip.style.display='block';
-      tip.style.left=(e.clientX+10)+'px';
-      tip.style.top=(e.clientY-24)+'px';
-    });
-    cell.addEventListener('mousemove', e => { tip.style.left=(e.clientX+10)+'px'; tip.style.top=(e.clientY-24)+'px'; });
-    cell.addEventListener('mouseleave', () => { tip.style.display='none'; });
+    cell.title = ds;
     c.appendChild(cell);
   }
 }
@@ -1631,23 +953,11 @@ function renderStatsView() {
   const days = Array.from({length:14}, (_,i) => { const d = new Date(today); d.setDate(today.getDate()-(13-i)); return d.toLocaleDateString([],{day:'numeric',month:'short'}); });
   const counts = days.map(ds => myPosts.filter(p => p.date === ds).length);
   const max = Math.max(...counts, 1);
-  chart.style.position='relative';
-  const tipId = 'statsPostChartTip';
-  chart.innerHTML = `<div id="${tipId}" style="display:none;position:absolute;top:-28px;background:rgba(4,8,18,0.97);border:1px solid rgba(0,255,200,0.25);padding:3px 9px;font-family:Space Mono,monospace;font-size:8px;color:#e0f5ef;border-radius:3px;white-space:nowrap;z-index:100;pointer-events:none"></div>` +
-    '<div style="display:flex;align-items:flex-end;gap:4px;height:70px">' +
+  chart.innerHTML = '<div style="display:flex;align-items:flex-end;gap:4px;height:70px">' +
     days.map((ds,i) => {
       const h = Math.round((counts[i]/max)*60)+4;
-      return `<div class="spc-col" data-date="${ds}" data-cnt="${counts[i]}" style="flex:1;display:flex;flex-direction:column;align-items:center;gap:2px;cursor:default"><div style="width:100%;height:${h}px;background:${counts[i]>0?'var(--u1-accl)':'rgba(255,255,255,0.04)'};border:1px solid ${counts[i]>0?'var(--u1-brd2)':'rgba(255,255,255,0.06)'};border-radius:2px;transition:all 0.3s"></div><div style="font-family:Space Mono,monospace;font-size:6px;color:rgba(255,255,255,0.3);transform:rotate(-45deg);transform-origin:center;white-space:nowrap">${ds.split(' ')[0]}</div></div>`;
+      return `<div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:2px"><div style="width:100%;height:${h}px;background:${counts[i]>0?'var(--u1-accl)':'rgba(255,255,255,0.04)'};border:1px solid ${counts[i]>0?'var(--u1-brd2)':'rgba(255,255,255,0.06)'};border-radius:2px;transition:all 0.3s" title="${ds}: ${counts[i]} posts"></div><div style="font-family:Space Mono,monospace;font-size:6px;color:rgba(255,255,255,0.3);transform:rotate(-45deg);transform-origin:center;white-space:nowrap">${ds.split(' ')[0]}</div></div>`;
     }).join('') + '</div>';
-  const tip2 = document.getElementById(tipId);
-  chart.querySelectorAll('.spc-col').forEach(col => {
-    col.addEventListener('mouseenter', () => {
-      tip2.textContent = `${col.dataset.date}: ${col.dataset.cnt} post${col.dataset.cnt!=1?'s':''}`;
-      tip2.style.display='block';
-      tip2.style.left=(col.offsetLeft+col.offsetWidth/2)+'px';
-    });
-    col.addEventListener('mouseleave', () => { tip2.style.display='none'; });
-  });
 }
 
 
@@ -2622,99 +1932,6 @@ function showToast(msg) {
   document.body.appendChild(t);
   setTimeout(() => { if (t) t.remove(); }, 3000);
 }
-
-// ── IN-APP CONFIRM MODAL ──
-function showConfirmModal(title, sub) {
-  return new Promise(resolve => {
-    const m = document.createElement('div');
-    m.style.cssText='position:fixed;inset:0;z-index:9500;background:rgba(0,0,0,0.75);display:flex;align-items:center;justify-content:center;backdrop-filter:blur(4px)';
-    m.innerHTML=`<div style="background:#040810;border:1px solid var(--u1-brd2);border-radius:6px;padding:22px;width:320px;max-width:95vw;box-shadow:0 0 40px rgba(0,0,0,0.8)">
-      <div style="font-family:Orbitron,monospace;font-size:11px;font-weight:700;color:var(--u1-acc);letter-spacing:0.12em;margin-bottom:8px">${title}</div>
-      ${sub?`<div style="font-family:Space Mono,monospace;font-size:9px;color:rgba(255,255,255,0.45);margin-bottom:16px">${sub}</div>`:''}
-      <div style="display:flex;gap:8px;margin-top:12px">
-        <button id="cmYes" style="flex:1;background:rgba(255,80,80,0.1);border:1px solid rgba(255,80,80,0.4);color:rgba(255,80,80,0.9);font-family:Orbitron,monospace;font-size:9px;font-weight:700;padding:10px;cursor:pointer;border-radius:3px;letter-spacing:0.1em">CONFIRM</button>
-        <button id="cmNo" style="flex:1;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.1);color:rgba(255,255,255,0.5);font-family:Orbitron,monospace;font-size:9px;font-weight:700;padding:10px;cursor:pointer;border-radius:3px;letter-spacing:0.1em">CANCEL</button>
-      </div></div>`;
-    document.body.appendChild(m);
-    m.querySelector('#cmYes').onclick=()=>{m.remove();resolve(true);};
-    m.querySelector('#cmNo').onclick=()=>{m.remove();resolve(false);};
-    m.addEventListener('click',e=>{if(e.target===m){m.remove();resolve(false);}});
-  });
-}
-
-// ── IN-APP TIME INPUT MODAL ──
-function showTimeInputModal() {
-  const m = document.createElement('div');
-  m.style.cssText='position:fixed;inset:0;z-index:9500;background:rgba(0,0,0,0.75);display:flex;align-items:center;justify-content:center;backdrop-filter:blur(4px)';
-  m.innerHTML=`<div style="background:#040810;border:1px solid var(--u1-brd2);border-radius:6px;padding:22px;width:320px;max-width:95vw;box-shadow:0 0 40px rgba(0,0,0,0.8)">
-    <div style="font-family:Orbitron,monospace;font-size:10px;font-weight:700;color:var(--u1-acc);letter-spacing:0.12em;margin-bottom:4px">⏱ LOG WORK TIME</div>
-    <div style="font-family:Space Mono,monospace;font-size:9px;color:rgba(255,255,255,0.4);margin-bottom:14px">how long did you work? (minutes)</div>
-    <input id="timeInp" placeholder="e.g. 45" type="number" min="1" style="width:100%;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.12);color:#e0f5ef;font-family:Space Mono,monospace;font-size:12px;padding:9px 13px;border-radius:3px;outline:none;margin-bottom:12px">
-    <div style="display:flex;gap:8px">
-      <button id="tiLog" style="flex:1;background:var(--u1-acc);color:#000;font-family:Orbitron,monospace;font-size:9px;font-weight:700;padding:10px;border:none;cursor:pointer;border-radius:3px;letter-spacing:0.1em">LOG</button>
-      <button id="tiSkip" style="flex:1;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.1);color:rgba(255,255,255,0.45);font-family:Orbitron,monospace;font-size:9px;font-weight:700;padding:10px;cursor:pointer;border-radius:3px;letter-spacing:0.1em">SKIP</button>
-    </div></div>`;
-  document.body.appendChild(m);
-  const inp=m.querySelector('#timeInp');
-  inp.focus();
-  const doLog=()=>{
-    const mins=parseInt(inp.value);
-    if(mins>0){
-      const ms=mins*60000;
-      import("https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js").then(({ref,push})=>{
-        try{push(ref(db,`sessions/${ME}`),{ts:Date.now(),duration:ms,log:1,user:ME,date:new Date().toLocaleDateString([],{day:'numeric',month:'short'})});updateSessionStatsUI();}catch(e){}
-      }).catch(()=>{});
-      showToast(`⏱ logged ${mins}min work session`);
-    }
-    m.remove();
-  };
-  m.querySelector('#tiLog').onclick=doLog;
-  m.querySelector('#tiSkip').onclick=()=>m.remove();
-  inp.addEventListener('keydown',e=>{if(e.key==='Enter')doLog();});
-  m.addEventListener('click',e=>{if(e.target===m)m.remove();});
-}
-
-// ── SESSION COMPLETE MODAL ──
-function showSessionCompleteModal(elapsed) {
-  const m = document.createElement('div');
-  m.style.cssText='position:fixed;inset:0;z-index:9500;background:rgba(0,0,0,0.75);display:flex;align-items:center;justify-content:center;backdrop-filter:blur(4px)';
-  m.innerHTML=`<div style="background:#040810;border:1px solid var(--u1-brd2);border-radius:6px;padding:22px;width:320px;max-width:95vw;box-shadow:0 0 40px rgba(0,0,0,0.8);text-align:center">
-    <div style="font-family:Orbitron,monospace;font-size:12px;font-weight:700;color:var(--u1-acc);letter-spacing:0.12em;margin-bottom:6px">📸 SESSION COMPLETE</div>
-    <div style="font-family:Orbitron,monospace;font-size:22px;font-weight:900;color:#fff;margin-bottom:4px">${fmtTime(elapsed)}</div>
-    <div style="font-family:Space Mono,monospace;font-size:9px;color:rgba(255,255,255,0.4);margin-bottom:16px">want to log a post?</div>
-    <div style="display:flex;gap:8px">
-      <button id="scYes" style="flex:1;background:var(--u1-acc);color:#000;font-family:Orbitron,monospace;font-size:9px;font-weight:700;padding:10px;border:none;cursor:pointer;border-radius:3px;letter-spacing:0.1em">✍ LOG POST</button>
-      <button id="scNo" style="flex:1;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.1);color:rgba(255,255,255,0.45);font-family:Orbitron,monospace;font-size:9px;font-weight:700;padding:10px;cursor:pointer;border-radius:3px;letter-spacing:0.1em">SKIP</button>
-    </div></div>`;
-  document.body.appendChild(m);
-  m.querySelector('#scYes').onclick=()=>{m.remove();goTab('feed');setTimeout(()=>document.getElementById('pinp1').focus(),100);};
-  m.querySelector('#scNo').onclick=()=>m.remove();
-  m.addEventListener('click',e=>{if(e.target===m)m.remove();});
-}
-
-// ── TO-DO LIST ──
-let todos = [];
-function loadTodos(){try{const d=localStorage.getItem('epoch_todos_'+ME);if(d)todos=JSON.parse(d);}catch(e){todos=[];}}
-function saveTodos(){try{localStorage.setItem('epoch_todos_'+ME,JSON.stringify(todos));}catch(e){}}
-function renderTodos(){
-  const c=document.getElementById('todoList');if(!c)return;
-  if(!todos.length){c.innerHTML='<div style="font-family:Space Mono,monospace;font-size:8px;color:rgba(255,255,255,0.2);text-align:center;padding:10px">no tasks — add one above</div>';return;}
-  c.innerHTML=todos.map((t,i)=>`<div style="display:flex;align-items:center;gap:8px;padding:6px 8px;background:${t.done?'rgba(0,255,200,0.04)':'rgba(255,255,255,0.02)'};border:1px solid ${t.done?'var(--u1-brd)':'rgba(255,255,255,0.06)'};border-radius:3px;margin-bottom:4px">
-    <div onclick="toggleTodo(${i})" style="width:14px;height:14px;border-radius:3px;border:1px solid ${t.done?'var(--u1-acc)':'rgba(255,255,255,0.2)'};background:${t.done?'var(--u1-accl)':'transparent'};cursor:pointer;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:9px">${t.done?'✓':''}</div>
-    <span style="flex:1;font-family:Space Mono,monospace;font-size:9px;color:${t.done?'rgba(255,255,255,0.3)':'rgba(255,255,255,0.8)'};text-decoration:${t.done?'line-through':'none'};line-height:1.4">${t.text}</span>
-    <button onclick="deleteTodo(${i})" style="background:none;border:none;color:rgba(255,80,80,0.4);cursor:pointer;font-size:11px;padding:0 2px;line-height:1">✕</button>
-  </div>`).join('');
-}
-window.toggleTodo=function(i){todos[i].done=!todos[i].done;saveTodos();renderTodos();};
-window.deleteTodo=function(i){todos.splice(i,1);saveTodos();renderTodos();};
-window.addTodo=function(){
-  const inp=document.getElementById('todoInp');if(!inp)return;
-  const txt=inp.value.trim();if(!txt)return;
-  todos.push({text:txt,done:false});
-  inp.value='';
-  saveTodos();renderTodos();
-};
-
 </script>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
@@ -3281,62 +2498,6 @@ body.ui-glass .taskbar,body.u1-glass .taskbar,body.u2-glass .taskbar{background:
 .fav-app-item:hover{background:var(--u1-acc2);border-color:var(--u1-brd2);transform:translateY(-1px)}
 .fav-add-btn{opacity:0.5}
 .fav-add-btn:hover{opacity:1}
-.fav-ed-card{display:flex;align-items:center;gap:8px;padding:7px 10px;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.07);border-radius:4px;transition:background 0.15s;cursor:default}
-.fav-ed-card:hover{background:rgba(255,255,255,0.05)}
-.fav-ed-card.fav-ed-dragging{opacity:0.4}
-.fav-ed-card.fav-ed-over{border-color:var(--u1-acc);background:rgba(0,255,200,0.06)}
-.fav-ed-drag{font-size:14px;color:rgba(255,255,255,0.2);cursor:grab;flex-shrink:0;user-select:none;line-height:1}
-.fav-ed-drag:active{cursor:grabbing}
-.fav-ed-icon{font-size:18px;flex-shrink:0;width:24px;text-align:center}
-.fav-ed-info{flex:1;min-width:0}
-.fav-ed-name{font-family:Space Mono,monospace;font-size:9px;color:#e0f5ef;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.fav-ed-url{font-family:Space Mono,monospace;font-size:7px;color:rgba(255,255,255,0.3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:1px}
-.fav-ed-wheel-btn{flex-shrink:0;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.1);color:rgba(255,255,255,0.2);font-size:11px;width:28px;height:28px;border-radius:4px;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:all 0.15s;line-height:1}
-.fav-ed-wheel-btn.on{background:rgba(0,255,200,0.12);border-color:rgba(0,255,200,0.45);color:rgba(0,255,200,0.9);box-shadow:0 0 8px rgba(0,255,200,0.15)}
-.fav-ed-del{flex-shrink:0;background:none;border:none;color:rgba(255,255,255,0.2);font-size:11px;width:22px;height:22px;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:color 0.15s;padding:0}
-.fav-ed-del:hover{color:rgba(255,80,80,0.8)}
-
-/* ── QUICK LAUNCH WHEEL ── */
-#quickWheelOverlay{transition:background 0.25s ease}
-#quickWheelOverlay.qw-visible{background:rgba(0,0,0,0.72)}
-.qw-bg{position:absolute;inset:0;backdrop-filter:blur(6px);opacity:0;transition:opacity 0.25s ease;pointer-events:none}
-#quickWheelOverlay.qw-visible .qw-bg{opacity:1}
-.qw-container{position:relative;width:400px;height:400px;flex-shrink:0}
-.qw-svg{position:absolute;inset:0;pointer-events:none}
-.qw-sector{fill:rgba(255,255,255,0.025);stroke:rgba(255,255,255,0.07);stroke-width:0.5;transition:fill 0.12s ease,stroke 0.12s ease;cursor:pointer}
-.qw-sector.qw-sec-active{fill:rgba(0,255,200,0.13);stroke:rgba(0,255,200,0.55);stroke-width:1}
-.qw-divider{stroke:rgba(255,255,255,0.1);stroke-width:0.5}
-.qw-slots-layer{position:absolute;inset:0;pointer-events:none}
-.qw-slot{position:absolute;top:50%;left:50%;display:flex;flex-direction:column;align-items:center;gap:4px;padding:8px 10px;background:rgba(10,14,24,0.85);border:1px solid rgba(255,255,255,0.1);border-radius:6px;min-width:62px;text-align:center;transition:background 0.18s,border-color 0.18s,box-shadow 0.18s,transform 0.22s cubic-bezier(0.34,1.56,0.64,1),opacity 0.22s ease;opacity:0;will-change:transform,opacity}
-#quickWheelOverlay.qw-visible .qw-slot{opacity:1}
-.qw-slot.qw-active{background:rgba(0,255,200,0.12)!important;border-color:rgba(0,255,200,0.6)!important;box-shadow:0 0 18px rgba(0,255,200,0.25),inset 0 0 8px rgba(0,255,200,0.06)!important}
-.qw-slot-icon{font-size:22px;line-height:1;filter:drop-shadow(0 0 4px rgba(0,255,200,0.0));transition:filter 0.15s}
-.qw-slot.qw-active .qw-slot-icon{filter:drop-shadow(0 0 6px rgba(0,255,200,0.5))}
-.qw-slot-name{font-family:'Space Mono',monospace;font-size:7px;color:rgba(255,255,255,0.5);white-space:nowrap;max-width:72px;overflow:hidden;text-overflow:ellipsis;letter-spacing:0.06em;transition:color 0.15s}
-.qw-slot.qw-active .qw-slot-name{color:rgba(0,255,200,0.9)}
-@keyframes qwPing{0%{box-shadow:0 0 0 0 rgba(0,255,200,0.5)}60%{box-shadow:0 0 0 8px rgba(0,255,200,0)}100%{box-shadow:0 0 0 0 rgba(0,255,200,0)}}
-.qw-slot.qw-ping{animation:qwPing 0.15s ease-out}
-.sess-cmp-bar{transition:filter 0.15s,outline 0.15s,height 0.2s}
-.sess-cmp-bar:hover{filter:brightness(1.35)}
-.sess-cmp-bar.sess-selected{filter:brightness(1.7)!important;outline:2px solid var(--u1-acc)!important;outline-offset:1px}
-
-/* Thin scrollbars for home widgets */
-#todoList::-webkit-scrollbar,
-#homeRecentPosts::-webkit-scrollbar,
-#favAppsGrid::-webkit-scrollbar { width:3px; }
-#todoList::-webkit-scrollbar-track,
-#homeRecentPosts::-webkit-scrollbar-track,
-#favAppsGrid::-webkit-scrollbar-track { background:transparent; }
-#todoList::-webkit-scrollbar-thumb,
-#homeRecentPosts::-webkit-scrollbar-thumb,
-#favAppsGrid::-webkit-scrollbar-thumb { background:rgba(255,255,255,0.15);border-radius:2px; }
-.qw-center-ring{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:86px;height:86px;border-radius:50%;background:rgba(6,10,20,0.92);border:2px solid rgba(0,255,200,0.25);box-shadow:0 0 24px rgba(0,255,200,0.12),inset 0 0 12px rgba(0,0,0,0.6);display:flex;align-items:center;justify-content:center;pointer-events:none}
-.qw-center-inner{display:flex;flex-direction:column;align-items:center;gap:2px}
-.qw-center-key{font-family:'Orbitron',monospace;font-size:8px;font-weight:900;color:rgba(0,255,200,0.5);letter-spacing:0.2em}
-.qw-center-label{font-family:'Space Mono',monospace;font-size:7px;color:rgba(255,255,255,0.35);letter-spacing:0.08em;text-align:center;max-width:72px;transition:opacity 0.15s;line-height:1.3}
-.qw-hint-ring{position:absolute;bottom:-32px;left:50%;transform:translateX(-50%);font-family:'Space Mono',monospace;font-size:8px;color:rgba(255,255,255,0.2);letter-spacing:0.18em;text-transform:uppercase;white-space:nowrap;pointer-events:none}
-/* slot positioning via JS inline transform, but we patch transition-delay per open */
-#quickWheelOverlay:not(.qw-visible) .qw-slot{transition:all 0.14s ease!important;opacity:0!important;transform:translate(-50%,-50%) scale(0.5)!important}
 
 /* ── TASKBAR HIDE ON HOME ── */
 body.on-home .taskbar{display:none!important}
@@ -3519,19 +2680,6 @@ body.on-home .taskbar{display:none!important}
         <input class="sinp" id="eggInp" placeholder="" oninput="checkEgg(this.value)">
       </div>
 
-      <!-- QUICK LAUNCH WHEEL -->
-      <div class="ssec">
-        <div class="slbl">quick launch wheel</div>
-        <div class="ssubl">SHORTCUT WHEEL</div>
-        <div class="srow" style="margin-top:8px;align-items:center;gap:8px">
-          <span style="font-family:Space Mono,monospace;font-size:9px;color:rgba(255,255,255,0.45)">hold key:</span>
-          <input class="sinp" id="qlKeyInp" placeholder="q" maxlength="1" style="margin:0;width:48px;text-align:center;font-size:14px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase" oninput="this.value=this.value.toLowerCase()">
-          <button class="sbtn" onclick="saveQuickLaunchKey()">save</button>
-          <button class="sbtn" onclick="openQuickWheelPreview()" style="border-color:rgba(0,255,200,0.35);color:rgba(0,255,200,0.8)">preview</button>
-        </div>
-        <div class="sinp-hint" style="margin-top:6px">hold [<span id="qlKeyDisplay">Q</span>] on home · aim mouse at app · release to launch</div>
-      </div>
-
       <!-- DANGER -->
       <div class="ssec">
         <div class="slbl">danger zone</div>
@@ -3587,18 +2735,11 @@ body.on-home .taskbar{display:none!important}
 
 
   <!-- HOME VIEW — IRON MAN DASHBOARD -->
-  <div id="homeView" style="display:none;flex:1;min-height:0;overflow:hidden;background:transparent">
-    <div id="homeDashboard" style="height:100%;padding:6px 10px;box-sizing:border-box;display:grid;grid-template-columns:repeat(12,1fr);gap:6px;width:100%;
-      grid-template-rows: minmax(0,1.8fr) minmax(0,1.1fr) minmax(0,1.4fr) minmax(0,1.5fr);
-      grid-template-areas:
-        'clk clk clk clk rec rec rec rec cmp cmp cmp cmp'
-        'mst mst mst fst fst fst act act act act act act'
-        'bar bar bar bar bar bar bar ssc ssc ssc ssc ssc'
-        'rp  rp  rp  rp  rp  rp  td  td  td  td  td  td';
-    ">
+  <div id="homeView" style="display:none;flex:1;min-height:0;overflow-y:auto;background:transparent">
+    <div id="homeDashboard" style="padding:10px 12px 80px;display:grid;grid-template-columns:repeat(12,1fr);grid-auto-rows:min-content;gap:8px;max-width:1400px;width:100%;margin:0 auto">
 
-      <!-- FUTURISTIC CLOCK -->
-      <div style="grid-area:clk;background:rgba(0,0,0,0.5);border:1px solid var(--u1-brd2);border-radius:4px;padding:10px 12px;position:relative;overflow:hidden;display:flex;flex-direction:column;justify-content:center;min-height:0">
+      <!-- FUTURISTIC CLOCK — spans 4 cols -->
+      <div style="grid-column:span 4;background:rgba(0,0,0,0.5);border:1px solid var(--u1-brd2);border-radius:4px;padding:12px;position:relative;overflow:hidden;display:flex;flex-direction:column;justify-content:center">
         <div style="position:absolute;top:6px;right:8px;font-family:Space Mono,monospace;font-size:6px;color:rgba(255,255,255,0.2);letter-spacing:0.12em">SYSTEM TIME</div>
         <div style="position:absolute;top:0;left:0;right:0;height:1px;background:linear-gradient(90deg,transparent,var(--u1-acc),transparent);opacity:0.7"></div>
         <div style="position:absolute;bottom:0;left:0;right:0;height:1px;background:linear-gradient(90deg,transparent,var(--u1-acc),transparent);opacity:0.3"></div>
@@ -3611,8 +2752,8 @@ body.on-home .taskbar{display:none!important}
         </div>
       </div>
 
-      <!-- SESSION RECORDER -->
-      <div id="sessionWidget" style="grid-area:rec;background:rgba(0,255,200,0.03);border:1px solid var(--u1-brd2);border-radius:4px;padding:10px;position:relative;overflow:hidden;min-height:0">
+      <!-- SESSION RECORDER — spans 4 cols -->
+      <div id="sessionWidget" style="grid-column:span 4;background:rgba(0,255,200,0.03);border:1px solid var(--u1-brd2);border-radius:4px;padding:10px;position:relative;overflow:hidden">
         <div style="position:absolute;top:0;left:0;right:0;height:1px;background:linear-gradient(90deg,transparent,var(--u1-acc),transparent);opacity:0.5"></div>
         <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px">
           <div id="sessionDot" style="width:7px;height:7px;border-radius:50%;background:rgba(255,255,255,0.15);transition:all 0.3s;flex-shrink:0"></div>
@@ -3626,15 +2767,15 @@ body.on-home .taskbar{display:none!important}
         </div>
       </div>
 
-      <!-- SESSION COMPARISON WIDGET -->
-      <div style="grid-area:cmp;background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.08);border-radius:4px;padding:10px;position:relative;overflow:hidden;min-height:0">
+      <!-- SESSION COMPARISON WIDGET — spans 4 cols -->
+      <div style="grid-column:span 4;background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.08);border-radius:4px;padding:10px;position:relative;overflow:hidden">
         <div style="position:absolute;top:0;left:0;right:0;height:1px;background:linear-gradient(90deg,transparent,var(--u1-acc),transparent);opacity:0.3"></div>
         <div style="font-family:Orbitron,monospace;font-size:7px;font-weight:700;color:rgba(255,255,255,0.4);letter-spacing:0.15em;margin-bottom:6px">📈 FOCUS DELTA</div>
         <div id="sessionCompWidget" style="font-family:Space Mono,monospace;font-size:9px;color:rgba(255,255,255,0.3)">start a session to<br>track focus time</div>
       </div>
 
-      <!-- MY STATS -->
-      <div style="grid-area:mst;background:var(--u1-bg2);border:1px solid var(--u1-brd);border-radius:4px;padding:10px;position:relative;overflow:hidden;min-height:0">
+      <!-- MY STATS — spans 3 cols -->
+      <div style="grid-column:span 3;background:var(--u1-bg2);border:1px solid var(--u1-brd);border-radius:4px;padding:10px;position:relative;overflow:hidden">
         <div style="position:absolute;top:0;left:0;right:0;height:1px;background:linear-gradient(90deg,transparent,var(--u1-acc),transparent)"></div>
         <div style="font-family:Orbitron,monospace;font-size:7px;font-weight:700;color:var(--u1-acc);letter-spacing:0.15em;margin-bottom:8px">⚡ MY STATS</div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">
@@ -3645,8 +2786,8 @@ body.on-home .taskbar{display:none!important}
         </div>
       </div>
 
-      <!-- FRIEND STATS -->
-      <div style="grid-area:fst;background:var(--u2-bg2);border:1px solid var(--u2-brd);border-radius:4px;padding:10px;position:relative;overflow:hidden;min-height:0">
+      <!-- FRIEND STATS — spans 3 cols -->
+      <div style="grid-column:span 3;background:var(--u2-bg2);border:1px solid var(--u2-brd);border-radius:4px;padding:10px;position:relative;overflow:hidden">
         <div style="position:absolute;top:0;left:0;right:0;height:1px;background:linear-gradient(90deg,transparent,var(--u2-acc),transparent)"></div>
         <div style="font-family:Orbitron,monospace;font-size:7px;font-weight:700;color:var(--u2-acc);letter-spacing:0.15em;margin-bottom:8px">⚡ FRIEND STATS</div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">
@@ -3657,138 +2798,87 @@ body.on-home .taskbar{display:none!important}
         </div>
       </div>
 
-      <!-- POST ACTIVITY CHART -->
-      <div style="grid-area:bar;background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.07);border-radius:4px;padding:10px;position:relative;overflow:hidden;min-height:0">
+      <!-- POST ACTIVITY CHART — spans 6 cols -->
+      <div style="grid-column:span 6;background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.07);border-radius:4px;padding:10px;position:relative;overflow:hidden">
         <div style="position:absolute;top:0;left:0;right:0;height:1px;background:linear-gradient(90deg,transparent,var(--u1-acc),transparent);opacity:0.4"></div>
         <div style="font-family:Orbitron,monospace;font-size:7px;font-weight:700;color:rgba(255,255,255,0.4);letter-spacing:0.15em;margin-bottom:6px">📊 14-DAY ACTIVITY</div>
         <div id="homeBarChart"></div>
       </div>
 
-      <!-- SESSION CHART -->
-      <div style="grid-area:ssc;background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.07);border-radius:4px;padding:10px;position:relative;overflow:hidden;min-height:0;display:flex;flex-direction:column">
+      <!-- MY 30-DAY HEATMAP — spans 4 cols -->
+      <div style="grid-column:span 4;background:rgba(0,255,200,0.02);border:1px solid var(--u1-brd);border-radius:4px;padding:10px;position:relative;overflow:hidden">
+        <div style="position:absolute;top:0;left:0;right:0;height:1px;background:linear-gradient(90deg,transparent,var(--u1-acc),transparent);opacity:0.4"></div>
+        <div style="font-family:Orbitron,monospace;font-size:7px;font-weight:700;color:var(--u1-acc);letter-spacing:0.15em;margin-bottom:6px">🗓 MY 30D GRID</div>
+        <div id="homeMiniHmap"></div>
+      </div>
+
+      <!-- FRIEND 30-DAY HEATMAP — spans 4 cols -->
+      <div style="grid-column:span 4;background:var(--u2-bg);border:1px solid var(--u2-brd);border-radius:4px;padding:10px;position:relative;overflow:hidden">
+        <div style="position:absolute;top:0;left:0;right:0;height:1px;background:linear-gradient(90deg,transparent,var(--u2-acc),transparent);opacity:0.4"></div>
+        <div style="font-family:Orbitron,monospace;font-size:7px;font-weight:700;color:var(--u2-acc);letter-spacing:0.15em;margin-bottom:6px">🗓 FRIEND 30D GRID</div>
+        <div id="homeMiniHmapFr"></div>
+      </div>
+
+      <!-- SESSION CHART — spans 4 cols -->
+      <div style="grid-column:span 4;background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.07);border-radius:4px;padding:10px;position:relative;overflow:hidden">
         <div style="position:absolute;top:0;left:0;right:0;height:1px;background:linear-gradient(90deg,transparent,rgba(255,255,255,0.3),transparent)"></div>
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;flex-shrink:0">
-          <div style="font-family:Orbitron,monospace;font-size:7px;font-weight:700;color:rgba(255,255,255,0.4);letter-spacing:0.15em">⏱ SESSION COMPARE</div>
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+          <div style="font-family:Orbitron,monospace;font-size:7px;font-weight:700;color:rgba(255,255,255,0.4);letter-spacing:0.15em">⏱ SESSION HISTORY</div>
           <button onclick="goTab('stats')" style="background:none;border:1px solid rgba(255,255,255,0.1);color:rgba(255,255,255,0.3);font-family:Space Mono,monospace;font-size:6px;padding:2px 6px;cursor:pointer;border-radius:2px">more →</button>
         </div>
-        <div id="statsSessionChart" style="flex:1;min-height:0;overflow:hidden"></div>
+        <div id="statsSessionChart" style="min-height:60px"></div>
       </div>
 
-      <!-- QUICK ACTIONS -->
-      <div style="grid-area:act;background:rgba(255,255,255,0.015);border:1px solid rgba(255,255,255,0.07);border-radius:4px;padding:10px;min-height:0">
-        <div style="font-family:Orbitron,monospace;font-size:7px;font-weight:700;color:rgba(255,255,255,0.4);letter-spacing:0.15em;margin-bottom:8px">⚡ ACTIONS + SHORTCUTS</div>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:5px;margin-bottom:8px">
-          <button onclick="goTab('feed');setTimeout(()=>document.getElementById('pinp1').focus(),100)" style="background:var(--u1-acc2);border:1px solid var(--u1-brd2);color:var(--u1-acc);font-family:Orbitron,monospace;font-size:7px;font-weight:700;padding:6px 4px;cursor:pointer;border-radius:2px;letter-spacing:0.06em">✍ LOG</button>
-          <button onclick="startSession()" style="background:rgba(0,255,200,0.06);border:1px solid rgba(0,255,200,0.25);color:#00ffc8;font-family:Orbitron,monospace;font-size:7px;font-weight:700;padding:6px 4px;cursor:pointer;border-radius:2px;letter-spacing:0.06em">🎬 REC</button>
-          <button onclick="showWeeklyReport()" style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.1);color:rgba(255,255,255,0.5);font-family:Orbitron,monospace;font-size:7px;font-weight:700;padding:6px 4px;cursor:pointer;border-radius:2px;letter-spacing:0.06em">📊 WRAP</button>
-          <button onclick="goTab('stats')" style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.1);color:rgba(255,255,255,0.5);font-family:Orbitron,monospace;font-size:7px;font-weight:700;padding:6px 4px;cursor:pointer;border-radius:2px;letter-spacing:0.06em">📈 STATS</button>
+      <!-- FAVORITE APPS — spans 8 cols -->
+      <div style="grid-column:span 8;background:rgba(255,255,255,0.015);border:1px solid rgba(255,255,255,0.07);border-radius:4px;padding:10px;position:relative;overflow:hidden">
+        <div style="position:absolute;top:0;left:0;right:0;height:1px;background:linear-gradient(90deg,transparent,rgba(255,255,255,0.15),transparent)"></div>
+        <div style="font-family:Orbitron,monospace;font-size:7px;font-weight:700;color:rgba(255,255,255,0.35);letter-spacing:0.15em;margin-bottom:8px">★ SHORTCUTS</div>
+        <div id="favAppsGrid" style="display:flex;flex-wrap:wrap;gap:6px"></div>
+      </div>
+
+      <!-- QUICK ACTIONS — spans 4 cols -->
+      <div style="grid-column:span 4;background:rgba(255,255,255,0.015);border:1px solid rgba(255,255,255,0.07);border-radius:4px;padding:10px">
+        <div style="font-family:Orbitron,monospace;font-size:7px;font-weight:700;color:rgba(255,255,255,0.4);letter-spacing:0.15em;margin-bottom:8px">⚡ ACTIONS</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:5px">
+          <button onclick="goTab('feed');setTimeout(()=>document.getElementById('pinp1').focus(),100)" style="background:var(--u1-acc2);border:1px solid var(--u1-brd2);color:var(--u1-acc);font-family:Orbitron,monospace;font-size:7px;font-weight:700;padding:8px 6px;cursor:pointer;border-radius:2px;letter-spacing:0.06em">✍ LOG</button>
+          <button onclick="startSession()" style="background:rgba(0,255,200,0.06);border:1px solid rgba(0,255,200,0.25);color:#00ffc8;font-family:Orbitron,monospace;font-size:7px;font-weight:700;padding:8px 6px;cursor:pointer;border-radius:2px;letter-spacing:0.06em">🎬 REC</button>
+          <button onclick="showWeeklyReport()" style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.1);color:rgba(255,255,255,0.5);font-family:Orbitron,monospace;font-size:7px;font-weight:700;padding:8px 6px;cursor:pointer;border-radius:2px;letter-spacing:0.06em">📊 WRAP</button>
+          <button onclick="goTab('stats')" style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.1);color:rgba(255,255,255,0.5);font-family:Orbitron,monospace;font-size:7px;font-weight:700;padding:8px 6px;cursor:pointer;border-radius:2px;letter-spacing:0.06em">📈 STATS</button>
         </div>
-        <div id="favAppsGrid" style="display:flex;flex-wrap:wrap;gap:4px;overflow-y:auto;max-height:80px"></div>
       </div>
 
-      <!-- RECENT POSTS -->
-      <div style="grid-area:rp;background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.07);border-radius:4px;padding:10px;position:relative;overflow:hidden;min-height:0;display:flex;flex-direction:column">
+      <!-- RECENT POSTS — spans 6 cols -->
+      <div style="grid-column:span 6;background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.07);border-radius:4px;padding:10px;position:relative;overflow:hidden">
         <div style="position:absolute;top:0;left:0;right:0;height:1px;background:linear-gradient(90deg,transparent,var(--u1-acc),transparent);opacity:0.3"></div>
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;flex-shrink:0">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
           <div style="font-family:Orbitron,monospace;font-size:7px;font-weight:700;color:rgba(255,255,255,0.4);letter-spacing:0.15em">📋 RECENT POSTS</div>
           <button onclick="goTab('feed')" style="background:none;border:1px solid rgba(255,255,255,0.1);color:rgba(255,255,255,0.3);font-family:Space Mono,monospace;font-size:6px;padding:2px 6px;cursor:pointer;border-radius:2px">feed →</button>
         </div>
-        <div id="homeRecentPosts" style="flex:1;overflow-y:auto;min-height:0"></div>
+        <div id="homeRecentPosts"></div>
       </div>
 
-      <!-- TO-DO LIST -->
-      <div style="grid-area:td;background:rgba(255,255,255,0.01);border:1px solid rgba(255,255,255,0.07);border-radius:4px;padding:10px;position:relative;overflow:hidden;min-height:0;display:flex;flex-direction:column">
+      <!-- QUOTE — spans 6 cols -->
+      <div style="grid-column:span 6;background:rgba(255,255,255,0.01);border:1px solid rgba(255,255,255,0.05);border-radius:4px;padding:12px;display:flex;flex-direction:column;justify-content:center;position:relative;overflow:hidden">
         <div style="position:absolute;left:0;top:0;bottom:0;width:2px;background:var(--u1-acc);opacity:0.4"></div>
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;flex-shrink:0">
-          <div style="font-family:Orbitron,monospace;font-size:7px;font-weight:700;color:rgba(255,255,255,0.4);letter-spacing:0.15em">✅ TO-DO</div>
-        </div>
-        <div style="display:flex;gap:6px;margin-bottom:6px;flex-shrink:0">
-          <input id="todoInp" placeholder="add a task..." onkeydown="if(event.key==='Enter')addTodo()" style="flex:1;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.1);color:#e0f5ef;font-family:Space Mono,monospace;font-size:10px;padding:5px 8px;border-radius:2px;outline:none">
-          <button onclick="addTodo()" style="background:var(--u1-acc);color:#000;font-family:Orbitron,monospace;font-size:7px;font-weight:700;padding:5px 8px;border:none;cursor:pointer;border-radius:2px;letter-spacing:0.06em">ADD</button>
-        </div>
-        <div id="todoList" style="flex:1;overflow-y:auto;min-height:0"></div>
+        <div style="font-family:Rajdhani,sans-serif;font-size:13px;font-style:italic;color:rgba(255,255,255,0.55);line-height:1.6;padding-left:10px" id="homeQuote"></div>
       </div>
 
     </div>
   </div>
 
   <!-- FAV APPS EDITOR MODAL -->
-  <div id="favEditorModal" style="display:none;position:fixed;inset:0;z-index:9000;background:rgba(0,0,0,0.88);align-items:flex-start;justify-content:center;backdrop-filter:blur(8px);overflow-y:auto;padding:20px 0">
-    <div style="background:linear-gradient(160deg,#040912 0%,#020608 100%);border:1px solid var(--u1-brd2);border-radius:8px;width:520px;max-width:97vw;box-shadow:0 0 80px rgba(0,0,0,0.9),0 0 40px var(--u1-accl);display:flex;flex-direction:column;margin:auto;position:relative;overflow:hidden">
-
-      <!-- top glow line -->
-      <div style="position:absolute;top:0;left:0;right:0;height:1px;background:linear-gradient(90deg,transparent,var(--u1-acc),transparent)"></div>
-
-      <!-- header -->
-      <div style="display:flex;align-items:center;justify-content:space-between;padding:18px 20px 14px">
-        <div>
-          <div style="font-family:Orbitron,monospace;font-size:11px;font-weight:700;color:var(--u1-acc);letter-spacing:0.18em;text-shadow:var(--u1-glow)">⚡ SHORTCUT MANAGER</div>
-          <div style="font-family:Space Mono,monospace;font-size:7px;color:rgba(255,255,255,0.3);margin-top:3px;letter-spacing:0.1em">ADD URLS · CUSTOM ICONS · QUICK LAUNCH WHEEL</div>
-        </div>
-        <button onclick="closeFavEditor()" style="background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.12);color:rgba(255,255,255,0.5);cursor:pointer;font-size:13px;width:28px;height:28px;border-radius:4px;display:flex;align-items:center;justify-content:center;transition:all 0.2s" onmouseover="this.style.borderColor='rgba(255,80,80,0.5)';this.style.color='rgba(255,80,80,0.8)'" onmouseout="this.style.borderColor='rgba(255,255,255,0.12)';this.style.color='rgba(255,255,255,0.5)'">✕</button>
+  <div id="favEditorModal" style="display:none;position:fixed;inset:0;z-index:9000;background:rgba(0,0,0,0.85);align-items:center;justify-content:center;backdrop-filter:blur(6px)">
+    <div style="background:#040810;border:1px solid var(--u1-brd2);border-radius:6px;padding:22px;width:380px;max-width:95vw;box-shadow:0 0 60px rgba(0,0,0,0.8)">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
+        <div style="font-family:Orbitron,monospace;font-size:10px;font-weight:700;color:var(--u1-acc);letter-spacing:0.15em">★ CUSTOMIZE SHORTCUTS</div>
+        <button onclick="closeFavEditor()" style="background:none;border:none;color:rgba(255,255,255,0.4);cursor:pointer;font-size:14px">✕</button>
       </div>
-
-      <!-- scan line decoration -->
-      <div style="height:1px;background:rgba(255,255,255,0.05);margin:0 20px"></div>
-
-      <!-- ADD NEW APP PANEL -->
-      <div style="padding:16px 20px;background:rgba(0,0,0,0.3)">
-        <div style="font-family:Orbitron,monospace;font-size:8px;font-weight:700;color:rgba(255,255,255,0.5);letter-spacing:0.2em;margin-bottom:12px">[ ADD NEW SHORTCUT ]</div>
-
-        <!-- row 1: icon selector + name + url -->
-        <div style="display:grid;grid-template-columns:56px 1fr 1fr;gap:8px;margin-bottom:8px;align-items:end">
-          <!-- icon/image picker block -->
-          <div>
-            <div style="font-family:Space Mono,monospace;font-size:7px;color:rgba(255,255,255,0.35);letter-spacing:0.1em;margin-bottom:5px">ICON</div>
-            <div id="fedIconPreview" onclick="document.getElementById('fedImgUpload').click()" style="width:56px;height:56px;border:1px dashed rgba(0,255,200,0.3);border-radius:6px;background:rgba(0,255,200,0.04);display:flex;align-items:center;justify-content:center;cursor:pointer;position:relative;overflow:hidden;transition:all 0.2s;font-size:22px" title="Click to upload image or use emoji below"
-              onmouseover="this.style.borderColor='var(--u1-acc)';this.style.background='rgba(0,255,200,0.08)'"
-              onmouseout="this.style.borderColor='rgba(0,255,200,0.3)';this.style.background='rgba(0,255,200,0.04)'">
-              <span id="fedIconEmoji" style="line-height:1">🌐</span>
-              <canvas id="fedIconCanvas" width="56" height="56" style="display:none;position:absolute;inset:0;width:100%;height:100%;border-radius:5px"></canvas>
-              <div style="position:absolute;bottom:0;left:0;right:0;background:rgba(0,0,0,0.6);font-family:Space Mono,monospace;font-size:6px;color:rgba(0,255,200,0.7);text-align:center;padding:2px 0;letter-spacing:0.06em">IMG</div>
-            </div>
-            <input type="file" id="fedImgUpload" accept="image/*" style="display:none" onchange="handleFedImageUpload(this)">
-          </div>
-          <!-- name -->
-          <div>
-            <div style="font-family:Space Mono,monospace;font-size:7px;color:rgba(255,255,255,0.35);letter-spacing:0.1em;margin-bottom:5px">APP NAME</div>
-            <input id="fedNameInp" placeholder="GitHub" maxlength="20" style="width:100%;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.1);color:#e0f5ef;font-family:Space Mono,monospace;font-size:10px;padding:8px 10px;border-radius:4px;outline:none;transition:border-color 0.2s" onfocus="this.style.borderColor='var(--u1-brd2)'" onblur="this.style.borderColor='rgba(255,255,255,0.1)'" onkeydown="if(event.key==='Enter')document.getElementById('fedUrlInp').focus()">
-          </div>
-          <!-- url -->
-          <div>
-            <div style="font-family:Space Mono,monospace;font-size:7px;color:rgba(255,255,255,0.35);letter-spacing:0.1em;margin-bottom:5px">URL</div>
-            <input id="fedUrlInp" placeholder="https://github.com" style="width:100%;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.1);color:#e0f5ef;font-family:Space Mono,monospace;font-size:10px;padding:8px 10px;border-radius:4px;outline:none;transition:border-color 0.2s" onfocus="this.style.borderColor='var(--u1-brd2)'" onblur="this.style.borderColor='rgba(255,255,255,0.1)'" onkeydown="if(event.key==='Enter')addFavAppFromEditor()">
-          </div>
-        </div>
-
-        <!-- row 2: emoji quick-pick + fetch favicon + add btn -->
-        <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
-          <div style="font-family:Space Mono,monospace;font-size:7px;color:rgba(255,255,255,0.3);flex-shrink:0">emoji:</div>
-          <div id="fedEmojiPicker" style="display:flex;gap:3px;flex-wrap:wrap;flex:1">
-            <!-- populated by JS -->
-          </div>
-          <button onclick="fetchFavicon()" title="Auto-fetch site favicon" style="background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.1);color:rgba(255,255,255,0.45);font-family:Space Mono,monospace;font-size:7px;padding:5px 9px;cursor:pointer;border-radius:3px;transition:all 0.2s;white-space:nowrap;flex-shrink:0" onmouseover="this.style.borderColor='var(--u1-brd2)';this.style.color='var(--u1-acc)'" onmouseout="this.style.borderColor='rgba(255,255,255,0.1)';this.style.color='rgba(255,255,255,0.45)'">⤓ favicon</button>
-          <button onclick="addFavAppFromEditor()" style="background:var(--u1-acc);color:#000;font-family:Orbitron,monospace;font-size:8px;font-weight:700;padding:7px 16px;border:none;cursor:pointer;border-radius:3px;letter-spacing:0.1em;flex-shrink:0;box-shadow:0 0 12px var(--u1-accl);transition:filter 0.2s" onmouseover="this.style.filter='brightness(1.15)'" onmouseout="this.style.filter=''">+ ADD</button>
-        </div>
+      <div style="font-family:Space Mono,monospace;font-size:8px;color:rgba(255,255,255,0.4);margin-bottom:8px;line-height:1.6">one app per line: <span style="color:var(--u1-acc)">emoji|Name|URL</span><br>e.g. 🐙|GitHub|https://github.com</div>
+      <textarea id="favEditorTextarea" style="width:100%;height:160px;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.1);color:#e0f5ef;font-family:Space Mono,monospace;font-size:10px;padding:10px;border-radius:3px;outline:none;resize:vertical;line-height:1.7" placeholder="🐙|GitHub|https://github.com"></textarea>
+      <div style="display:flex;gap:8px;margin-top:12px">
+        <button onclick="saveFavEditor()" style="flex:1;background:var(--u1-acc);color:#000;font-family:Orbitron,monospace;font-size:9px;font-weight:700;padding:10px;border:none;cursor:pointer;border-radius:3px;letter-spacing:0.1em">SAVE</button>
+        <button onclick="closeFavEditor()" style="flex:1;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.1);color:rgba(255,255,255,0.5);font-family:Orbitron,monospace;font-size:9px;font-weight:700;padding:10px;cursor:pointer;border-radius:3px;letter-spacing:0.1em">CANCEL</button>
       </div>
-
-      <div style="height:1px;background:rgba(255,255,255,0.05);margin:0 20px"></div>
-
-      <!-- EXISTING APPS LIST -->
-      <div style="padding:14px 20px 6px;flex:1;min-height:0">
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
-          <div style="font-family:Orbitron,monospace;font-size:8px;font-weight:700;color:rgba(255,255,255,0.5);letter-spacing:0.2em">[ INSTALLED SHORTCUTS ]</div>
-          <div style="font-family:Space Mono,monospace;font-size:7px;color:rgba(255,255,255,0.25)">⚡ = in wheel &nbsp;·&nbsp; drag to reorder</div>
-        </div>
-        <div id="favEditorList" style="max-height:280px;overflow-y:auto;display:flex;flex-direction:column;gap:5px;padding-right:2px"></div>
-      </div>
-
-      <!-- footer actions -->
-      <div style="padding:14px 20px 18px;display:flex;gap:8px">
-        <button onclick="saveFavEditor()" style="flex:1;background:var(--u1-acc);color:#000;font-family:Orbitron,monospace;font-size:9px;font-weight:700;padding:11px;border:none;cursor:pointer;border-radius:4px;letter-spacing:0.1em;box-shadow:0 0 16px var(--u1-accl);transition:filter 0.2s" onmouseover="this.style.filter='brightness(1.1)'" onmouseout="this.style.filter=''">✓ DONE</button>
-        <button onclick="closeFavEditor()" style="background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.1);color:rgba(255,255,255,0.4);font-family:Orbitron,monospace;font-size:9px;font-weight:700;padding:11px 18px;cursor:pointer;border-radius:4px;letter-spacing:0.1em;transition:all 0.2s" onmouseover="this.style.borderColor='rgba(255,255,255,0.25)'" onmouseout="this.style.borderColor='rgba(255,255,255,0.1)'">CANCEL</button>
-      </div>
-
     </div>
   </div>
 
@@ -3842,9 +2932,9 @@ body.on-home .taskbar{display:none!important}
 
       <!-- Session chart -->
       <div style="background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.08);border-radius:4px;padding:16px">
-        <div style="font-family:Orbitron,monospace;font-size:10px;font-weight:700;color:rgba(255,255,255,0.6);letter-spacing:0.12em;margin-bottom:12px">⏱ SESSION COMPARISON — ME vs FRIEND</div>
+        <div style="font-family:Orbitron,monospace;font-size:10px;font-weight:700;color:rgba(255,255,255,0.6);letter-spacing:0.12em;margin-bottom:12px">⏱ SESSION RECORDINGS</div>
         <div id="statsSessionChart2"></div>
-        <div style="font-family:Space Mono,monospace;font-size:8px;color:rgba(255,255,255,0.3);margin-top:8px">click your bars to select · delete removes that day's sessions</div>
+        <div style="font-family:Space Mono,monospace;font-size:8px;color:rgba(255,255,255,0.3);margin-top:8px">sessions tracked via 🎬 session recorder on home page</div>
       </div>
     </div>
   </div>
@@ -3994,23 +3084,7 @@ body.on-home .taskbar{display:none!important}
 
 </div>
 
-<!-- QUICK LAUNCH WHEEL OVERLAY -->
-<div id="quickWheelOverlay" style="display:none;position:fixed;inset:0;z-index:99000;align-items:center;justify-content:center;background:rgba(0,0,0,0);pointer-events:all">
-  <div id="qwBg" class="qw-bg"></div>
-  <div id="qwContainer" class="qw-container">
-    <svg id="qwSectors" class="qw-svg" viewBox="0 0 400 400" width="400" height="400"></svg>
-    <div id="qwSlots" class="qw-slots-layer"></div>
-    <div class="qw-center-ring">
-      <div class="qw-center-inner">
-        <div class="qw-center-key" id="qwKeyHint">HOLD</div>
-        <div class="qw-center-label" id="qwCenterLabel">QUICK LAUNCH</div>
-      </div>
-    </div>
-    <div class="qw-hint-ring">AIM · RELEASE TO OPEN</div>
-  </div>
-</div>
-
-
+<!-- GIPHY PICKER -->
 <div id="giphyPicker" style="display:none;position:fixed;bottom:80px;left:50%;transform:translateX(-50%);width:360px;max-height:380px;background:rgba(4,6,14,0.98);border:1px solid rgba(0,255,200,0.2);border-radius:6px;z-index:8000;flex-direction:column;box-shadow:0 8px 40px rgba(0,0,0,0.8),0 0 30px rgba(0,255,200,0.08)">
   <div style="display:flex;align-items:center;gap:8px;padding:10px 12px;border-bottom:1px solid rgba(255,255,255,0.06)">
     <input id="giphySearch" placeholder="search gifs..." style="flex:1;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.1);color:#e0f5ef;font-family:'Space Mono',monospace;font-size:10px;padding:6px 10px;border-radius:2px;outline:none" onkeydown="if(event.key==='Enter')searchGiphy()">
