@@ -1200,7 +1200,7 @@ function renderWheelSlots() {
     slot.style.transitionDelay = `${i * 28}ms`;
     // Handle both image and emoji icons
     const iconHtml = a.img
-      ? `<img src="${a.img}" style="width:100%;height:100%;object-fit:cover;border-radius:4px;display:block" draggable="false">`
+      ? `<img src="${a.img}" style="width:70%;height:70%;object-fit:contain;filter:drop-shadow(0 0 8px rgba(0,255,200,0.3)) brightness(1.1) contrast(1.05);display:block;margin:0 auto" draggable="false">`
       : `<span style="font-size:20px;line-height:1">${a.icon}</span>`;
     slot.innerHTML = `<div class="qw-slot-icon">${iconHtml}</div><div class="qw-slot-name">${a.name}</div>`;
     slotWrap.appendChild(slot);
