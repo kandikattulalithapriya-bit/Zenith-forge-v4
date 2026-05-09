@@ -1122,7 +1122,10 @@ function renderFavApps() {
   if (!c) return;
   const apps = getFavApps();
   c.innerHTML = apps.map((a,i) => `<a href="${a.url}" target="_blank" class="fav-app-item">
-    <span style="font-size:16px;line-height:1">${a.icon}</span>
+    ${a.img
+      ? `<img src="${a.img}" style="width:16px;height:16px;object-fit:cover;border-radius:2px;display:block" draggable="false">`
+      : `<span style="font-size:16px;line-height:1">${a.icon}</span>`
+    }
     <span style="font-family:Space Mono,monospace;font-size:6px;color:rgba(255,255,255,0.55);max-width:52px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:center">${a.name}</span>
   </a>`).join('') +
   `<div class="fav-app-item fav-add-btn" onclick="openFavEditor()" title="customize apps">
@@ -1195,7 +1198,11 @@ function renderWheelSlots() {
     // Start collapsed at center
     slot.style.transform = `translate(-50%, -50%) scale(0.5)`;
     slot.style.transitionDelay = `${i * 28}ms`;
-    slot.innerHTML = `<div class="qw-slot-icon">${a.icon}</div><div class="qw-slot-name">${a.name}</div>`;
+    // Handle both image and emoji icons
+    const iconHtml = a.img
+      ? `<img src="${a.img}" style="width:100%;height:100%;object-fit:cover;border-radius:4px;display:block" draggable="false">`
+      : `<span style="font-size:20px;line-height:1">${a.icon}</span>`;
+    slot.innerHTML = `<div class="qw-slot-icon">${iconHtml}</div><div class="qw-slot-name">${a.name}</div>`;
     slotWrap.appendChild(slot);
     // Animate out after paint
     requestAnimationFrame(() => requestAnimationFrame(() => {
@@ -1429,27 +1436,83 @@ window.fetchFavicon = function() {
   if (!url) { showToast('enter a URL first'); return; }
   try {
     const host = new URL(url.startsWith('http') ? url : 'https://' + url).hostname;
-    const favUrl = `https://www.google.com/s2/favicons?domain=${host}&sz=64`;
+    // Try multiple favicon sources for better reliability
+    const faviconSources = [
+      `https://www.google.com/s2/favicons?domain=${host}&sz=64`,
+      `https://favicon.yandex.net/favicon/${host}`,
+      `https://api.faviconkit.com/${host}/64`,
+      `https://${host}/favicon.ico`
+    ];
+
+    let currentSource = 0;
     showToast('⤓ fetching favicon...');
-    const img = new Image();
-    img.crossOrigin = 'anonymous';
-    img.onload = () => {
-      const canvas = document.getElementById('fedIconCanvas');
-      if (!canvas) return;
-      const accentHex = getComputedStyle(document.documentElement).getPropertyValue('--u1-acc').trim() || '#00ffc8';
-      applyScifiTint(img, canvas, accentHex);
-      canvas.style.display = 'block';
-      const emojiEl = document.getElementById('fedIconEmoji');
-      if (emojiEl) emojiEl.style.display = 'none';
-      fedPendingImage = canvas.toDataURL('image/png');
-      // Also auto-fill name from hostname if empty
-      const nameInp = document.getElementById('fedNameInp');
-      if (nameInp && !nameInp.value) nameInp.value = host.replace('www.','').split('.')[0];
-      showToast('favicon loaded ✓');
+
+    // Show loading state
+    const emojiEl = document.getElementById('fedIconEmoji');
+    const canvas = document.getElementById('fedIconCanvas');
+    if (emojiEl) {
+      emojiEl.textContent = '⏳';
+      emojiEl.style.display = '';
+    }
+    if (canvas) canvas.style.display = 'none';
+
+    const tryNextSource = () => {
+      if (currentSource >= faviconSources.length) {
+        showToast('favicon not found — using default icon');
+        // Set default emoji as fallback
+        if (emojiEl) {
+          emojiEl.textContent = '🌐';
+          emojiEl.style.display = '';
+        }
+        if (canvas) canvas.style.display = 'none';
+        fedPendingImage = null;
+        fedPendingEmoji = '🌐';
+        return;
+      }
+
+      const favUrl = faviconSources[currentSource];
+      const img = new Image();
+      img.crossOrigin = 'anonymous';
+      img.onload = () => {
+        // Check if image loaded successfully by checking dimensions
+        if (img.naturalWidth === 0 || img.naturalHeight === 0) {
+          currentSource++;
+          tryNextSource();
+          return;
+        }
+
+        if (!canvas) return;
+        const accentHex = getComputedStyle(document.documentElement).getPropertyValue('--u1-acc').trim() || '#00ffc8';
+        applyScifiTint(img, canvas, accentHex);
+        canvas.style.display = 'block';
+        if (emojiEl) emojiEl.style.display = 'none';
+        fedPendingImage = canvas.toDataURL('image/png');
+        fedPendingEmoji = null;
+        // Also auto-fill name from hostname if empty
+        const nameInp = document.getElementById('fedNameInp');
+        if (nameInp && !nameInp.value) nameInp.value = host.replace('www.','').split('.')[0];
+        showToast('favicon loaded ✓');
+      };
+      img.onerror = () => {
+        currentSource++;
+        tryNextSource();
+      };
+      img.src = favUrl;
     };
-    img.onerror = () => showToast('favicon not found — try uploading manually');
-    img.src = favUrl;
-  } catch(e) { showToast('invalid url'); }
+
+    tryNextSource();
+  } catch(e) {
+    showToast('invalid url');
+    console.error('Favicon fetch error:', e);
+    // Reset to default on error
+    const emojiEl = document.getElementById('fedIconEmoji');
+    const canvas = document.getElementById('fedIconCanvas');
+    if (emojiEl) {
+      emojiEl.textContent = '🌐';
+      emojiEl.style.display = '';
+    }
+    if (canvas) canvas.style.display = 'none';
+  }
 };
 
 window.openFavEditor = function() {
