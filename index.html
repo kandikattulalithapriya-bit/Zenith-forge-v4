@@ -1022,7 +1022,7 @@ function renderHomeWidgets() {
   // Recent posts
   const rp = document.getElementById('homeRecentPosts');
   if (rp) {
-    const sorted = [...myPosts].sort((a,b) => b.ts - a.ts).slice(0,3);
+    const sorted = [...myPosts].sort((a,b) => b.ts - a.ts).slice(0,2);
     if (!sorted.length) { rp.innerHTML = '<div style="font-family:Space Mono,monospace;font-size:8px;color:rgba(255,255,255,0.2);text-align:center;padding:8px">no posts yet</div>'; }
     else {
       rp.innerHTML = sorted.map(p => `<div style="padding:6px 8px;background:var(--u1-acc2);border:1px solid var(--u1-brd);border-radius:2px;cursor:pointer;margin-bottom:4px" onclick="goTab('feed')">
@@ -2718,7 +2718,7 @@ window.addTodo=function(){
 </script>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
-html,body{height:100%;min-height:100vh;overflow:hidden}
+html,body{height:100%;min-height:100vh;overflow:auto}
 body{background:#030508;color:#e0f5ef;font-family:'Space Mono',monospace;transition:background 0.5s}
 
 /* ── THEME VARS ── */
@@ -2850,7 +2850,7 @@ body.u1-glass .sett,body.u2-glass .sett{background:rgba(7,9,26,0.94);backdrop-fi
 #gbg{position:fixed;inset:0;pointer-events:none;z-index:0;background-image:linear-gradient(rgba(0,255,200,0.025) 1px,transparent 1px),linear-gradient(90deg,rgba(0,255,200,0.025) 1px,transparent 1px);background-size:48px 48px}
 #scanlines{position:fixed;inset:0;pointer-events:none;z-index:0;background:repeating-linear-gradient(0deg,transparent,transparent 3px,rgba(0,0,0,0.08) 3px,rgba(0,0,0,0.08) 4px)}
 #app{position:relative;z-index:1;min-height:100vh;display:flex;flex-direction:column}
-#mainApp{display:none;flex-direction:column;min-height:100vh;flex:1;overflow:hidden}
+#mainApp{display:none;flex-direction:column;min-height:100vh;flex:1;overflow:visible}
 #mainApp.active{display:flex}
 
 /* ── LOGIN ── */
@@ -2991,8 +2991,8 @@ body.ui-glass .taskbar,body.u1-glass .taskbar,body.u2-glass .taskbar{background:
 .ntab.on{color:var(--u1-acc);border-bottom-color:var(--u1-acc);text-shadow:0 0 10px var(--u1-acc)}
 
 /* ── DUAL FEED ── */
-.dual-feed{display:grid;grid-template-columns:1fr 1fr;flex:1;min-height:0;overflow:hidden}
-.col{display:flex;flex-direction:column;border-right:1px solid rgba(255,255,255,0.05);overflow:hidden;min-height:0}
+.dual-feed{display:grid;grid-template-columns:1fr 1fr;flex:1;min-height:0;overflow:visible}
+.col{display:flex;flex-direction:column;border-right:1px solid rgba(255,255,255,0.05);overflow:visible;min-height:0}
 .col:last-child{border-right:none}
 .col-u1{background:linear-gradient(180deg,var(--u1-bg) 0%,#030508 100%)}
 .col-u2{background:linear-gradient(180deg,var(--u2-bg) 0%,#030508 100%)}
@@ -3340,6 +3340,11 @@ body.ui-glass .taskbar,body.u1-glass .taskbar,body.u2-glass .taskbar{background:
 
 /* ── TASKBAR HIDE ON HOME ── */
 body.on-home .taskbar{display:none!important}
+body.on-home{overflow:hidden}
+
+/* ── LIMIT HEIGHT FOR HOME PAGE SECTIONS ── */
+#homeRecentPosts { max-height: 100px; }
+#todoList { max-height: 100px; }
 </style>
 </head>
 <body>
@@ -3587,8 +3592,8 @@ body.on-home .taskbar{display:none!important}
 
 
   <!-- HOME VIEW — IRON MAN DASHBOARD -->
-  <div id="homeView" style="display:none;flex:1;min-height:0;overflow:hidden;background:transparent">
-    <div id="homeDashboard" style="height:100%;padding:6px 10px;box-sizing:border-box;display:grid;grid-template-columns:repeat(12,1fr);gap:6px;width:100%;
+  <div id="homeView" style="display:none;flex:1;overflow:hidden;background:transparent">
+    <div id="homeDashboard" style="height:100%;padding:6px 10px;box-sizing:border-box;display:grid;grid-template-columns:repeat(12,1fr);gap:6px;width:100%;overflow:hidden;
       grid-template-rows: minmax(0,1.8fr) minmax(0,1.1fr) minmax(0,1.4fr) minmax(0,1.5fr);
       grid-template-areas:
         'clk clk clk clk rec rec rec rec cmp cmp cmp cmp'
@@ -3793,7 +3798,7 @@ body.on-home .taskbar{display:none!important}
   </div>
 
   <!-- STATS VIEW (replaces heatmap) -->
-  <div id="statsView" style="display:none;overflow-y:auto;flex:1;min-height:0;padding:16px">
+  <div id="statsView" style="display:none;overflow-y:auto;flex:1;padding:16px">
     <div style="max-width:1100px;margin:0 auto;display:flex;flex-direction:column;gap:16px">
       <!-- Header -->
       <div style="font-family:Orbitron,monospace;font-size:14px;font-weight:900;color:var(--u1-acc);letter-spacing:0.15em;text-shadow:var(--u1-glow)">📈 STATS DASHBOARD</div>
@@ -3850,7 +3855,7 @@ body.on-home .taskbar{display:none!important}
   </div>
 
   <!-- FEED -->
-  <div id="feedView" style="display:flex;flex:1;min-height:0;overflow:hidden">
+  <div id="feedView" style="display:flex;flex:1;overflow:visible">
     <div class="dual-feed" style="flex:1">
       <div class="col col-u1">
         <div class="col-header">
@@ -3878,7 +3883,7 @@ body.on-home .taskbar{display:none!important}
   </div>
 
   <!-- TIMELINE -->
-  <div id="timelineView" style="display:none;overflow-y:auto;flex:1;min-height:0">
+  <div id="timelineView" style="display:none;overflow-y:auto;flex:1">
     <div class="tl-wrap">
       <div class="tl-col tl-u1">
         <div class="tl-col-title" id="tlTitle1">MY TIMELINE</div>
@@ -3892,7 +3897,7 @@ body.on-home .taskbar{display:none!important}
   </div>
 
   <!-- HEATMAP -->
-  <div id="heatmapView" style="display:none;overflow-y:auto;flex:1;min-height:0">
+  <div id="heatmapView" style="display:none;overflow-y:auto;flex:1">
     <div class="hmap-page">
       <div class="hmap-panel hmap-u1">
         <div class="hmap-title" id="hmapName1">MY CONSISTENCY</div>
